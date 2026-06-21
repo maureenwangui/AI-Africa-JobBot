@@ -66,9 +66,38 @@ router.get('/plans', (req, res) => {
 router.post('/create', auth, async (req, res) => {
   try {
     const { plan, billing_cycle = 'monthly' } = req.body;
+
+    // Validate plan name
+    const validPlans = ['starter', 'growth', 'pro'];
+    const validCycles = ['monthly', '3mo', '6mo'];
+    if (!validPlans.includes(plan)) {
+      return res.status(400).json({ error: `Invalid plan "${plan}". Must be: starter, growth, or pro.` });
+    }
+    if (!validCycles.includes(billing_cycle)) {
+      return res.status(400).json({ error: `Invalid billing cycle "${billing_cycle}". Must be: monthly, 3mo, or 6mo.` });
+    }
+
     const key = `${plan}_${billing_cycle}`;
     const planId = PLAN_IDS[key];
-    if (!planId) return res.status(400).json({ error: 'Invalid plan or billing cycle' });
+
+    // PayPal plan IDs not configured yet
+    if (!planId) {
+      return res.status(400).json({
+        error: `PayPal plan ID not configured for ${plan} (${billing_cycle}). Add PAYPAL_PLAN_${plan.toUpperCase()}_${billing_cycle.toUpperCase()} to your .env file.`,
+        code: 'PAYPAL_NOT_CONFIGURED',
+        plan,
+        billing_cycle,
+        env_key: `PAYPAL_PLAN_${plan.toUpperCase()}_${billing_cycle.replace('mo','MO')}`,
+      });
+    }
+
+    // Check PayPal credentials
+    if (!process.env.PAYPAL_CLIENT_ID || !process.env.PAYPAL_CLIENT_SECRET) {
+      return res.status(400).json({
+        error: 'PayPal credentials not configured. Add PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET to your .env file.',
+        code: 'PAYPAL_NOT_CONFIGURED',
+      });
+    }
 
     const token = await getPayPalToken();
 

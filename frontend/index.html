@@ -138,7 +138,7 @@ h1 span{color:var(--bright)}
     <li><a onclick="goToDashboard()" id="nav-dashboard">Dashboard</a></li>
     <li><a onclick="show('login')" id="nav-login" id="nav-login-link">Login</a></li>
   </ul>
-  <button class="nav-btn" id="nav-cta" onclick="show('register')">Get Started Free</button>
+  <button class="nav-btn" id="nav-cta" onclick="goToDashboard()">My Dashboard</button>
 </nav>
 
 <!-- ════════════════════════════════════════════════════════════
@@ -150,8 +150,8 @@ h1 span{color:var(--bright)}
     <h1>Apply to <span>Hundreds of Jobs</span><br>Without Lifting a Finger</h1>
     <p>Upload your CV once. Our AI finds jobs that match your skills, applies on your behalf, and keeps you updated with every application submitted.</p>
     <div class="cta-row">
-      <button class="btn-primary" onclick="show('register')">Start Free Trial</button>
-      <button class="btn-outline" onclick="show('pricing')">View Pricing</button>
+      <button class="btn-primary" onclick="show('pricing')">View Pricing</button>
+      <button class="btn-outline" onclick="goToDashboard()">My Dashboard</button>
     </div>
   </div>
   <div class="stats-row">
@@ -419,11 +419,11 @@ function goToDashboard() {
 function updateNavForLoggedIn() {
   const cta = document.getElementById('nav-cta');
   if (currentUser) {
-    cta.textContent = 'Dashboard';
+    cta.textContent = 'My Dashboard';
     cta.onclick = () => show('dashboard');
   } else {
-    cta.textContent = 'Get Started Free';
-    cta.onclick = () => show('register');
+    cta.textContent = 'Sign In';
+    cta.onclick = () => show('login');
   }
 }
 
@@ -674,20 +674,43 @@ function setBilling(plan) {
 }
 
 async function selectPlan(plan) {
-  if (!token) { show('register'); return; }
+  if (!token) { show('login'); return; }
+
+  // Map display billing name to backend value
+  const billingMap = { 'monthly': 'monthly', '3mo': '3mo', '6mo': '6mo' };
+  const billing_cycle = billingMap[currentBilling] || 'monthly';
+
   toast('Connecting to PayPal...', 'info');
   try {
     const res = await apiFetch('/subscription/create', {
       method: 'POST',
-      body: JSON.stringify({ plan, billing_cycle: currentBilling }),
+      body: JSON.stringify({ plan, billing_cycle }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Could not create subscription');
+
+    // PayPal not configured yet - show helpful message
+    if (data.code === 'PAYPAL_NOT_CONFIGURED' || !res.ok) {
+      if (data.error && data.error.includes('PayPal')) {
+        toast('⚠️ PayPal not configured yet. Add PAYPAL_CLIENT_ID to your .env file.', 'error');
+        return;
+      }
+      throw new Error(data.error || 'Could not create subscription');
+    }
+
     if (data.approve_url) {
-      window.location.href = data.approve_url; // → PayPal checkout
+      window.location.href = data.approve_url;
+    } else if (data.subscription_id) {
+      toast('✅ Subscription created! Redirecting...', 'success');
     }
   } catch (err) {
-    toast('❌ ' + err.message, 'error');
+    const msg = err.message;
+    if (msg.includes('Invalid plan') || msg.includes('billing cycle')) {
+      toast('⚠️ PayPal plan IDs not set up yet. Add your PayPal plan IDs to .env to enable payments.', 'error');
+    } else if (msg.includes('fetch') || msg.includes('NetworkError')) {
+      toast('❌ Cannot reach server. Is node server.js running?', 'error');
+    } else {
+      toast('❌ ' + msg, 'error');
+    }
   }
 }
 
