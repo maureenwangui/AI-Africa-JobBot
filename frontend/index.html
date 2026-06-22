@@ -175,19 +175,31 @@ h1 span{color:var(--bright)}
      PRICING
 ════════════════════════════════════════════════════════════ -->
 <section id="pricing">
-  <div style="max-width:900px;margin:0 auto">
+  <div style="max-width:960px;margin:0 auto">
     <div class="section-title">Simple, Transparent Pricing</div>
-    <div class="section-sub">Cancel anytime. No hidden fees. 7-day free trial.</div>
+    <div class="section-sub">Pay with M-Pesa or Card. Cancel anytime. No hidden fees.</div>
+
+    <!-- Payment method badges -->
+    <div style="display:flex;gap:0.75rem;justify-content:center;margin-bottom:1.5rem;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:0.4rem;background:rgba(0,150,57,0.15);border:1px solid rgba(0,150,57,0.3);color:#00E676;padding:0.4rem 1rem;border-radius:100px;font-size:0.8rem;font-weight:600">📱 M-Pesa STK Push</div>
+      <div style="display:flex;align-items:center;gap:0.4rem;background:rgba(255,140,0,0.15);border:1px solid rgba(255,140,0,0.3);color:#FFA040;padding:0.4rem 1rem;border-radius:100px;font-size:0.8rem;font-weight:600">💳 Card / Bank Transfer</div>
+      <div style="display:flex;align-items:center;gap:0.4rem;background:rgba(66,165,245,0.15);border:1px solid rgba(66,165,245,0.3);color:var(--bright);padding:0.4rem 1rem;border-radius:100px;font-size:0.8rem;font-weight:600">🔒 Secured by Flutterwave</div>
+    </div>
+
+    <!-- Billing toggle -->
     <div class="toggle-row">
       <button class="toggle-btn active" id="toggle-monthly" onclick="setBilling('monthly')">Monthly</button>
       <button class="toggle-btn" id="toggle-3mo" onclick="setBilling('3mo')">3 Months <span style="color:var(--green);font-size:0.72rem;margin-left:4px">Save 17%</span></button>
       <button class="toggle-btn" id="toggle-6mo" onclick="setBilling('6mo')">6 Months <span style="color:var(--green);font-size:0.72rem;margin-left:4px">Save 25%</span></button>
     </div>
+
+    <!-- Plan cards -->
     <div class="pricing-grid">
+      <!-- STARTER -->
       <div class="plan-card">
         <div class="plan-name">STARTER</div>
-        <div class="plan-price" id="price-starter"><sup>$</sup>4</div>
-        <div class="plan-period" id="period-starter">per month · KES 500</div>
+        <div class="plan-price" id="price-starter"><sup>KES</sup>500</div>
+        <div class="plan-period" id="period-starter">per month</div>
         <ul class="plan-features">
           <li>20 job applications/month</li>
           <li>Basic AI CV generator</li>
@@ -195,13 +207,16 @@ h1 span{color:var(--bright)}
           <li>Daily WhatsApp summary</li>
           <li>Email notifications</li>
         </ul>
-        <button class="plan-btn plan-btn-outline" onclick="selectPlan('starter')">Get Starter</button>
+        <button class="plan-btn plan-btn-outline" style="margin-bottom:0.5rem" onclick="payWithMpesa('starter')">📱 Pay with M-Pesa</button>
+        <button class="plan-btn" style="background:rgba(255,140,0,0.15);color:#FFA040;border:1px solid rgba(255,140,0,0.3)" onclick="payWithFlutterwave('starter')">💳 Pay with Card</button>
       </div>
+
+      <!-- GROWTH -->
       <div class="plan-card featured">
         <div class="plan-popular">⚡ Most Popular</div>
         <div class="plan-name">GROWTH</div>
-        <div class="plan-price" id="price-growth"><sup>$</sup>9</div>
-        <div class="plan-period" id="period-growth">per month · KES 1,200</div>
+        <div class="plan-price" id="price-growth"><sup>KES</sup>1,200</div>
+        <div class="plan-period" id="period-growth">per month</div>
         <ul class="plan-features">
           <li>80 job applications/month</li>
           <li>Advanced ATS CV optimization</li>
@@ -209,12 +224,15 @@ h1 span{color:var(--bright)}
           <li>AI job matching engine</li>
           <li>WhatsApp + email alerts</li>
         </ul>
-        <button class="plan-btn plan-btn-solid" onclick="selectPlan('growth')">Get Growth</button>
+        <button class="plan-btn plan-btn-solid" style="margin-bottom:0.5rem" onclick="payWithMpesa('growth')">📱 Pay with M-Pesa</button>
+        <button class="plan-btn" style="background:rgba(255,140,0,0.2);color:#FFA040;border:1px solid rgba(255,140,0,0.4)" onclick="payWithFlutterwave('growth')">💳 Pay with Card</button>
       </div>
+
+      <!-- PRO -->
       <div class="plan-card">
         <div class="plan-name">PRO</div>
-        <div class="plan-price" id="price-pro"><sup>$</sup>19</div>
-        <div class="plan-period" id="period-pro">per month · KES 2,500</div>
+        <div class="plan-price" id="price-pro"><sup>KES</sup>2,500</div>
+        <div class="plan-period" id="period-pro">per month</div>
         <ul class="plan-features">
           <li>200+ job applications/month</li>
           <li>Priority AI job matching</li>
@@ -222,12 +240,30 @@ h1 span{color:var(--bright)}
           <li>Interview tracking AI</li>
           <li>"Apply Until Hired" mode</li>
         </ul>
-        <button class="plan-btn plan-btn-outline" onclick="selectPlan('pro')">Get Pro</button>
+        <button class="plan-btn plan-btn-outline" style="margin-bottom:0.5rem" onclick="payWithMpesa('pro')">📱 Pay with M-Pesa</button>
+        <button class="plan-btn" style="background:rgba(255,140,0,0.15);color:#FFA040;border:1px solid rgba(255,140,0,0.3)" onclick="payWithFlutterwave('pro')">💳 Pay with Card</button>
       </div>
     </div>
-    <p style="text-align:center;margin-top:1.5rem;color:var(--subtext);font-size:0.82rem;font-weight:300">All plans include: 7-day free trial · PayPal secure checkout · Cancel anytime · Based in Nairobi 🇰🇪</p>
+
+    <p style="text-align:center;margin-top:1.5rem;color:var(--subtext);font-size:0.82rem;font-weight:300">
+      M-Pesa Paybill · Visa · Mastercard · Airtel Money · Bank Transfer · Cancel anytime · 🇰🇪 Made for Kenya
+    </p>
   </div>
 </section>
+
+<!-- ── M-PESA MODAL ── -->
+<div id="mpesa-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#041B3D;border:1px solid rgba(66,165,245,0.3);border-radius:18px;padding:2rem;max-width:420px;width:90%;margin:1rem">
+    <h3 style="font-family:'Syne',sans-serif;font-size:1.3rem;font-weight:700;margin-bottom:0.5rem">📱 M-Pesa Payment</h3>
+    <p style="color:var(--subtext);font-size:0.88rem;margin-bottom:1.5rem;font-weight:300">Enter your Safaricom number. You'll receive an STK push to enter your M-Pesa PIN.</p>
+    <div id="mpesa-plan-info" style="background:rgba(0,150,57,0.1);border:1px solid rgba(0,150,57,0.2);border-radius:10px;padding:1rem;margin-bottom:1.25rem;font-size:0.88rem;color:#00E676"></div>
+    <label class="form-label">M-Pesa Phone Number</label>
+    <input class="form-input" id="mpesa-phone" type="tel" placeholder="0712 345 678" style="margin-bottom:1rem">
+    <button class="full-btn" id="mpesa-pay-btn" onclick="submitMpesa()" style="background:#009639">Send STK Push 📱</button>
+    <div id="mpesa-status" style="display:none;margin-top:1rem;text-align:center;font-size:0.88rem;color:var(--subtext)"></div>
+    <button onclick="closeMpesaModal()" style="width:100%;margin-top:0.75rem;background:transparent;color:var(--subtext);border:none;cursor:pointer;font-size:0.85rem;padding:0.5rem">Cancel</button>
+  </div>
+</div>
 
 <!-- ════════════════════════════════════════════════════════════
      LOGIN
@@ -655,9 +691,9 @@ async function uploadCVFromDash(input) {
 
 // ── PRICING ───────────────────────────────────────────────────────────────────
 const prices = {
-  monthly: { starter:'4', growth:'9', pro:'19', sp:'per month · KES 500', gp:'per month · KES 1,200', pp:'per month · KES 2,500' },
-  '3mo':   { starter:'10', growth:'24', pro:'50', sp:'for 3 months · Save 17%', gp:'for 3 months · Save 11%', pp:'for 3 months · Save 12%' },
-  '6mo':   { starter:'18', growth:'45', pro:'85', sp:'for 6 months · Save 25%', gp:'for 6 months · Save 17%', pp:'for 6 months · Save 26%' },
+  monthly: { starter:'500',  growth:'1,200',  pro:'2,500',  sp:'per month', gp:'per month', pp:'per month' },
+  '3mo':   { starter:'1,300', growth:'3,000',  pro:'6,200',  sp:'for 3 months · Save 17%', gp:'for 3 months · Save 17%', pp:'for 3 months · Save 17%' },
+  '6mo':   { starter:'2,400', growth:'5,600',  pro:'10,600', sp:'for 6 months · Save 20%', gp:'for 6 months · Save 22%', pp:'for 6 months · Save 29%' },
 };
 
 function setBilling(plan) {
@@ -665,52 +701,134 @@ function setBilling(plan) {
   document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('toggle-'+plan).classList.add('active');
   const p = prices[plan];
-  document.getElementById('price-starter').innerHTML = '<sup>$</sup>' + p.starter;
-  document.getElementById('price-growth').innerHTML  = '<sup>$</sup>' + p.growth;
-  document.getElementById('price-pro').innerHTML     = '<sup>$</sup>' + p.pro;
+  document.getElementById('price-starter').innerHTML = '<sup>KES</sup>' + p.starter;
+  document.getElementById('price-growth').innerHTML  = '<sup>KES</sup>' + p.growth;
+  document.getElementById('price-pro').innerHTML     = '<sup>KES</sup>' + p.pro;
   document.getElementById('period-starter').textContent = p.sp;
   document.getElementById('period-growth').textContent  = p.gp;
   document.getElementById('period-pro').textContent     = p.pp;
 }
 
-async function selectPlan(plan) {
+// ── M-PESA ────────────────────────────────────────────────────────────────────
+let mpesaActivePlan = '';
+const planNames = { starter: 'Starter', growth: 'Growth', pro: 'Pro' };
+const planAmounts = {
+  monthly: { starter: 'KES 500',   growth: 'KES 1,200', pro: 'KES 2,500'  },
+  '3mo':   { starter: 'KES 1,300', growth: 'KES 3,000', pro: 'KES 6,200'  },
+  '6mo':   { starter: 'KES 2,400', growth: 'KES 5,600', pro: 'KES 10,600' },
+};
+
+function payWithMpesa(plan) {
   if (!token) { show('login'); return; }
+  mpesaActivePlan = plan;
+  const amount = planAmounts[currentBilling][plan];
+  document.getElementById('mpesa-plan-info').innerHTML =
+    `<strong>${planNames[plan]} Plan</strong> — ${amount} (${currentBilling})`;
+  // Pre-fill phone from profile if available
+  if (currentUser?.phone) document.getElementById('mpesa-phone').value = currentUser.phone;
+  document.getElementById('mpesa-status').style.display = 'none';
+  document.getElementById('mpesa-modal').style.display = 'flex';
+}
 
-  // Map display billing name to backend value
-  const billingMap = { 'monthly': 'monthly', '3mo': '3mo', '6mo': '6mo' };
-  const billing_cycle = billingMap[currentBilling] || 'monthly';
+function closeMpesaModal() {
+  document.getElementById('mpesa-modal').style.display = 'none';
+  document.getElementById('mpesa-status').style.display = 'none';
+}
 
-  toast('Connecting to PayPal...', 'info');
+async function submitMpesa() {
+  const phone = document.getElementById('mpesa-phone').value.trim();
+  const statusEl = document.getElementById('mpesa-status');
+  const btn = document.getElementById('mpesa-pay-btn');
+  if (!phone) { toast('Please enter your M-Pesa phone number', 'error'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Sending STK Push...';
+  statusEl.style.display = 'none';
+
   try {
-    const res = await apiFetch('/subscription/create', {
+    const res = await apiFetch('/subscription/mpesa/initiate', {
       method: 'POST',
-      body: JSON.stringify({ plan, billing_cycle }),
+      body: JSON.stringify({ plan: mpesaActivePlan, billing_cycle: currentBilling, phone }),
     });
     const data = await res.json();
 
-    // PayPal not configured yet - show helpful message
-    if (data.code === 'PAYPAL_NOT_CONFIGURED' || !res.ok) {
-      if (data.error && data.error.includes('PayPal')) {
-        toast('⚠️ PayPal not configured yet. Add PAYPAL_CLIENT_ID to your .env file.', 'error');
+    if (!res.ok) {
+      if (data.code === 'MPESA_NOT_CONFIGURED') {
+        toast('⚠️ M-Pesa not configured yet. Add MPESA keys to .env', 'error');
+        closeMpesaModal();
         return;
       }
-      throw new Error(data.error || 'Could not create subscription');
+      throw new Error(data.error || 'M-Pesa request failed');
     }
 
-    if (data.approve_url) {
-      window.location.href = data.approve_url;
-    } else if (data.subscription_id) {
-      toast('✅ Subscription created! Redirecting...', 'success');
+    statusEl.style.display = 'block';
+    statusEl.style.color = '#00E676';
+    statusEl.innerHTML = '✅ STK Push sent to <strong>' + phone + '</strong>.<br>Check your phone and enter your M-Pesa PIN.';
+    btn.textContent = 'Waiting for payment...';
+
+    // Poll for payment confirmation every 5 seconds
+    const checkoutId = data.checkout_request_id;
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts++;
+      if (attempts > 12) { // 1 minute timeout
+        clearInterval(poll);
+        statusEl.style.color = '#EF5350';
+        statusEl.textContent = 'Payment timeout. Please try again.';
+        btn.disabled = false;
+        btn.textContent = 'Send STK Push 📱';
+        return;
+      }
+      try {
+        const r = await apiFetch('/subscription/mpesa/check', { method: 'POST', body: JSON.stringify({ checkout_request_id: checkoutId }) });
+        const d = await r.json();
+        if (d.status === 'active') {
+          clearInterval(poll);
+          closeMpesaModal();
+          toast('🎉 Payment successful! ' + (planNames[d.plan]||d.plan) + ' plan activated!', 'success');
+          setTimeout(() => { show('dashboard'); loadDashboard(); }, 1500);
+        } else if (d.status === 'failed') {
+          clearInterval(poll);
+          statusEl.style.color = '#EF5350';
+          statusEl.textContent = 'Payment failed. Please try again.';
+          btn.disabled = false;
+          btn.textContent = 'Send STK Push 📱';
+        }
+      } catch {}
+    }, 5000);
+
+  } catch (err) {
+    statusEl.style.display = 'block';
+    statusEl.style.color = '#EF5350';
+    statusEl.textContent = '❌ ' + err.message;
+    btn.disabled = false;
+    btn.textContent = 'Send STK Push 📱';
+  }
+}
+
+// ── FLUTTERWAVE ───────────────────────────────────────────────────────────────
+async function payWithFlutterwave(plan) {
+  if (!token) { show('login'); return; }
+  toast('Connecting to payment gateway...', 'info');
+  try {
+    const res = await apiFetch('/subscription/flutterwave/initiate', {
+      method: 'POST',
+      body: JSON.stringify({ plan, billing_cycle: currentBilling, currency: 'KES' }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (data.code === 'FLW_NOT_CONFIGURED') {
+        toast('⚠️ Flutterwave not configured yet. Add FLUTTERWAVE_SECRET_KEY to .env', 'error');
+        return;
+      }
+      throw new Error(data.error || 'Payment initiation failed');
+    }
+    if (data.payment_url) {
+      toast('Redirecting to payment page...', 'info');
+      window.location.href = data.payment_url;
     }
   } catch (err) {
-    const msg = err.message;
-    if (msg.includes('Invalid plan') || msg.includes('billing cycle')) {
-      toast('⚠️ PayPal plan IDs not set up yet. Add your PayPal plan IDs to .env to enable payments.', 'error');
-    } else if (msg.includes('fetch') || msg.includes('NetworkError')) {
-      toast('❌ Cannot reach server. Is node server.js running?', 'error');
-    } else {
-      toast('❌ ' + msg, 'error');
-    }
+    toast('❌ ' + err.message, 'error');
   }
 }
 

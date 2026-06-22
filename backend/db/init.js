@@ -91,16 +91,37 @@ db.exec(`
     user_id               INTEGER NOT NULL,
     plan                  TEXT NOT NULL,
     billing_cycle         TEXT NOT NULL DEFAULT 'monthly',
-    provider              TEXT NOT NULL DEFAULT 'paypal',
+    provider              TEXT NOT NULL DEFAULT 'flutterwave',
     status                TEXT NOT NULL DEFAULT 'pending',
-    paypal_subscription_id TEXT UNIQUE,
-    paypal_plan_id        TEXT,
+    -- M-Pesa fields
+    checkout_request_id   TEXT,
+    mpesa_receipt         TEXT,
+    -- Flutterwave fields
+    tx_ref                TEXT UNIQUE,
+    flw_transaction_id    TEXT,
+    -- Common fields
     start_date            TEXT,
     end_date              TEXT,
     amount                REAL,
-    currency              TEXT DEFAULT 'USD',
+    amount_paid           REAL,
+    currency              TEXT DEFAULT 'KES',
     created_at            TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  -- ─── PAYMENTS LOG ──────────────────────────────────────────────────────────
+  CREATE TABLE IF NOT EXISTS payments (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    subscription_id INTEGER,
+    provider        TEXT NOT NULL,
+    amount          REAL NOT NULL,
+    currency        TEXT DEFAULT 'KES',
+    status          TEXT NOT NULL DEFAULT 'pending',
+    reference       TEXT,
+    metadata        TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 

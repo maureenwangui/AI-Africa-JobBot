@@ -49,8 +49,7 @@ app.use('/api/auth/', authLimiter);
 if (process.env.NODE_ENV !== 'production') app.use(morgan('dev'));
 
 // ─── Body Parsing ─────────────────────────────────────────────────────────────
-// Raw body needed for PayPal webhooks
-app.use('/api/webhooks/paypal', express.raw({ type: 'application/json' }));
+// Webhooks use their own express.json() per route
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
