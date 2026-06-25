@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Africa JobBot — Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--navy:#041B3D;--mid:#1565C0;--sky:#1E88E5;--bright:#42A5F5;--green:#00E676;--gold:#FFC107;--red:#EF5350;--subtext:#90CAF9;--muted:#B3C9E8}
+body{font-family:'DM Sans',sans-serif;background:var(--navy);color:#fff;min-height:100vh}
+nav{display:flex;align-items:center;justify-content:space-between;padding:1rem 2rem;border-bottom:1px solid rgba(255,255,255,0.08);background:rgba(4,27,61,0.97);position:sticky;top:0;z-index:100}
+.logo{font-family:'Syne',sans-serif;font-weight:800;font-size:1.1rem}.logo span{color:var(--bright)}
+.admin-badge{background:rgba(255,193,7,0.15);color:var(--gold);border:1px solid rgba(255,193,7,0.3);font-size:0.72rem;font-weight:600;padding:0.25rem 0.75rem;border-radius:100px}
+.main{display:grid;grid-template-columns:200px 1fr;min-height:calc(100vh - 60px)}
+.sidebar{background:rgba(13,71,161,0.2);border-right:1px solid rgba(255,255,255,0.06);padding:1rem 0}
+.nav-item{display:flex;align-items:center;gap:0.6rem;padding:0.7rem 1.25rem;cursor:pointer;font-size:0.85rem;color:var(--subtext);transition:all 0.15s;border-left:2px solid transparent}
+.nav-item:hover{color:#fff;background:rgba(66,165,245,0.08)}
+.nav-item.active{color:#fff;background:rgba(66,165,245,0.12);border-left-color:var(--bright)}
+.content{padding:1.5rem}
+.page{display:none}.page.active{display:block}
+.page-title{font-family:'Syne',sans-serif;font-size:1.3rem;font-weight:700;margin-bottom:1.25rem}
+/* Metrics */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:1.5rem}
+.metric{background:rgba(21,101,192,0.25);border:1px solid rgba(66,165,245,0.15);border-radius:12px;padding:1.25rem}
+.metric-icon{font-size:1.4rem;margin-bottom:0.4rem}
+.metric-val{font-family:'Syne',sans-serif;font-size:1.8rem;font-weight:800}
+.metric-label{font-size:0.75rem;color:var(--muted);margin-top:0.2rem;text-transform:uppercase;letter-spacing:0.5px}
+.metric-sub{font-size:0.72rem;color:var(--green);margin-top:0.2rem}
+/* Table */
+.table-wrap{background:rgba(13,71,161,0.2);border:1px solid rgba(66,165,245,0.15);border-radius:12px;overflow:hidden}
+.table-head{display:grid;background:rgba(21,101,192,0.4);padding:0.7rem 1rem;font-size:0.72rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;gap:0.5rem}
+.table-row{display:grid;padding:0.75rem 1rem;border-top:1px solid rgba(255,255,255,0.05);gap:0.5rem;font-size:0.82rem;align-items:center}
+.table-row:hover{background:rgba(255,255,255,0.03)}
+.cell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{display:inline-block;font-size:0.68rem;font-weight:600;padding:0.2rem 0.6rem;border-radius:5px}
+.badge-free{background:rgba(144,202,249,0.15);color:#90CAF9}
+.badge-starter{background:rgba(66,165,245,0.15);color:var(--bright)}
+.badge-growth{background:rgba(255,193,7,0.15);color:var(--gold)}
+.badge-pro{background:rgba(0,230,118,0.15);color:var(--green)}
+.badge-active{background:rgba(0,230,118,0.15);color:var(--green)}
+.badge-inactive{background:rgba(144,202,249,0.1);color:#90CAF9}
+.badge-sent{background:rgba(66,165,245,0.15);color:var(--bright)}
+.badge-interview{background:rgba(0,230,118,0.15);color:var(--green)}
+.badge-rejected{background:rgba(239,83,80,0.15);color:var(--red)}
+/* Search */
+.search-bar{background:rgba(255,255,255,0.05);border:1px solid rgba(66,165,245,0.2);border-radius:8px;padding:0.6rem 1rem;color:#fff;font-family:inherit;font-size:0.88rem;outline:none;width:280px;margin-bottom:1rem}
+/* Add Job Form */
+.form-card{background:rgba(13,71,161,0.2);border:1px solid rgba(66,165,245,0.15);border-radius:12px;padding:1.5rem;margin-bottom:1rem}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.form-group{margin-bottom:1rem}
+.form-label{display:block;font-size:0.72rem;color:var(--muted);font-weight:500;margin-bottom:0.35rem;text-transform:uppercase;letter-spacing:0.5px}
+.form-input{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(66,165,245,0.2);border-radius:8px;padding:0.65rem 0.9rem;color:#fff;font-family:inherit;font-size:0.88rem;outline:none}
+.form-input:focus{border-color:var(--bright)}
+textarea.form-input{resize:vertical;min-height:80px}
+.btn-primary{background:var(--sky);color:#fff;border:none;padding:0.7rem 1.5rem;border-radius:8px;font-family:inherit;font-weight:600;font-size:0.88rem;cursor:pointer}
+.btn-danger{background:rgba(239,83,80,0.15);color:var(--red);border:1px solid rgba(239,83,80,0.3);padding:0.4rem 0.75rem;border-radius:6px;font-family:inherit;font-size:0.75rem;cursor:pointer}
+.loading{color:var(--subtext);padding:2rem;text-align:center}
+.toast{position:fixed;bottom:2rem;right:2rem;background:rgba(21,101,192,0.95);border:1px solid rgba(66,165,245,0.3);border-radius:12px;padding:1rem 1.5rem;font-size:0.9rem;z-index:9999;transform:translateY(20px);opacity:0;transition:all 0.3s;pointer-events:none}
+.toast.show{transform:translateY(0);opacity:1}
+.toast.success{border-color:rgba(0,230,118,0.4);background:rgba(0,51,28,0.97)}
+.toast.error{border-color:rgba(239,83,80,0.4);background:rgba(60,10,10,0.97)}
+@media(max-width:640px){.main{grid-template-columns:1fr}.sidebar{display:flex;overflow-x:auto;padding:0.5rem}.form-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="toast" id="toast"></div>
+
+<nav>
+  <div class="logo">Africa <span>JobBot</span> <span style="font-size:0.75rem;color:var(--muted);font-weight:400;margin-left:4px">Admin</span></div>
+  <div style="display:flex;align-items:center;gap:1rem">
+    <span class="admin-badge">🛠️ Admin Panel</span>
+    <span id="admin-name" style="font-size:0.85rem;color:var(--subtext)"></span>
+    <button onclick="doLogout()" style="background:transparent;color:var(--subtext);border:none;cursor:pointer;font-size:0.82rem">Sign Out</button>
+  </div>
+</nav>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="nav-item active" onclick="showPage('overview')">📊 Overview</div>
+    <div class="nav-item" onclick="showPage('users')">👥 Users</div>
+    <div class="nav-item" onclick="showPage('applications')">📋 Applications</div>
+    <div class="nav-item" onclick="showPage('jobs')">💼 Jobs</div>
+    <div class="nav-item" onclick="showPage('add-job')">➕ Add Job</div>
+  </div>
+
+  <div class="content">
+
+    <!-- OVERVIEW -->
+    <div class="page active" id="page-overview">
+      <div class="page-title">📊 Overview</div>
+      <div class="metrics" id="overview-metrics">
+        <div class="loading">Loading stats...</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">
+        <div>
+          <div style="font-size:0.75rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:0.75rem">Recent Signups</div>
+          <div class="table-wrap" id="recent-users"><div class="loading">Loading...</div></div>
+        </div>
+        <div>
+          <div style="font-size:0.75rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:0.75rem">Recent Applications</div>
+          <div class="table-wrap" id="recent-apps"><div class="loading">Loading...</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- USERS -->
+    <div class="page" id="page-users">
+      <div class="page-title">👥 All Users</div>
+      <input class="search-bar" id="user-search" placeholder="Search by name or email..." oninput="filterUsers()">
+      <div class="table-wrap">
+        <div class="table-head" style="grid-template-columns:2fr 1.5fr 0.8fr 0.8fr 1fr 0.6fr">#&nbsp;Name / Email<span>Joined</span><span>Plan</span><span>Status</span><span>Phone</span><span>Apps</span></div>
+        <div id="users-list"><div class="loading">Loading...</div></div>
+      </div>
+    </div>
+
+    <!-- APPLICATIONS -->
+    <div class="page" id="page-applications">
+      <div class="page-title">📋 All Applications</div>
+      <input class="search-bar" id="app-search" placeholder="Search by job or company..." oninput="filterApps()">
+      <div class="table-wrap">
+        <div class="table-head" style="grid-template-columns:2fr 1.5fr 1.5fr 0.8fr 1fr">User<span>Job Title</span><span>Company</span><span>Status</span><span>Date</span></div>
+        <div id="apps-list"><div class="loading">Loading...</div></div>
+      </div>
+    </div>
+
+    <!-- JOBS -->
+    <div class="page" id="page-jobs">
+      <div class="page-title">💼 Job Listings</div>
+      <input class="search-bar" id="job-search" placeholder="Search jobs..." oninput="filterJobs()">
+      <div class="table-wrap">
+        <div class="table-head" style="grid-template-columns:2fr 1.5fr 1.5fr 0.8fr 0.8fr">Title<span>Company</span><span>Location</span><span>Remote</span><span>Action</span></div>
+        <div id="jobs-list"><div class="loading">Loading...</div></div>
+      </div>
+    </div>
+
+    <!-- ADD JOB -->
+    <div class="page" id="page-add-job">
+      <div class="page-title">➕ Add New Job</div>
+      <div class="form-card">
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">Job Title *</label>
+            <input class="form-input" id="job-title" placeholder="Executive Assistant">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Company *</label>
+            <input class="form-input" id="job-company" placeholder="Safaricom PLC">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Location</label>
+            <input class="form-input" id="job-location" placeholder="Nairobi, Kenya">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Salary Range</label>
+            <input class="form-input" id="job-salary" placeholder="KES 80,000 - 120,000">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Apply Email</label>
+            <input class="form-input" id="job-email" type="email" placeholder="careers@company.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Apply URL</label>
+            <input class="form-input" id="job-url" placeholder="https://company.com/jobs/123">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Source</label>
+            <input class="form-input" id="job-source" placeholder="BrighterMonday / LinkedIn / Direct">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Remote?</label>
+            <select class="form-input" id="job-remote">
+              <option value="0">No — On-site</option>
+              <option value="1">Yes — Remote</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Job Description *</label>
+          <textarea class="form-input" id="job-description" placeholder="Describe the role, responsibilities, and what makes it great..."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Requirements</label>
+          <textarea class="form-input" id="job-requirements" placeholder="List the qualifications, experience, and skills required..."></textarea>
+        </div>
+        <button class="btn-primary" onclick="addJob()">➕ Add Job Listing</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:5000/api';
+let token = localStorage.getItem('jobbot_token');
+let allUsers = [], allApps = [], allJobs = [];
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', async () => {
+  if (!token) { window.location.href = 'index.html'; return; }
+  try {
+    const me = await apiFetch('/auth/me');
+    const user = await me.json();
+    if (user.role !== 'admin') {
+      alert('Admin access required');
+      window.location.href = 'index.html';
+      return;
+    }
+    document.getElementById('admin-name').textContent = user.name || user.email;
+    loadAll();
+  } catch { window.location.href = 'index.html'; }
+});
+
+async function apiFetch(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...opts.headers };
+  return fetch(API + path, { ...opts, headers });
+}
+
+function toast(msg, type = 'info') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + type;
+  setTimeout(() => el.className = 'toast', 3500);
+}
+
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  event.target.classList.add('active');
+}
+
+function doLogout() {
+  localStorage.removeItem('jobbot_token');
+  window.location.href = 'index.html';
+}
+
+// ── Load All Data ─────────────────────────────────────────────────────────────
+async function loadAll() {
+  const [statsRes, usersRes, appsRes, jobsRes] = await Promise.all([
+    apiFetch('/admin/stats'),
+    apiFetch('/admin/users'),
+    apiFetch('/admin/applications'),
+    apiFetch('/admin/jobs'),
+  ]);
+  const stats = await statsRes.json();
+  allUsers = await usersRes.json();
+  allApps  = await appsRes.json();
+  allJobs  = await jobsRes.json();
+
+  renderStats(stats);
+  renderRecentUsers();
+  renderRecentApps();
+  renderUsers(allUsers);
+  renderApps(allApps);
+  renderJobs(allJobs);
+}
+
+// ── Overview ──────────────────────────────────────────────────────────────────
+function renderStats(s) {
+  document.getElementById('overview-metrics').innerHTML = `
+    <div class="metric"><div class="metric-icon">👥</div><div class="metric-val">${s.total_users||0}</div><div class="metric-label">Total Users</div></div>
+    <div class="metric"><div class="metric-icon">⚡</div><div class="metric-val">${s.active_subscribers||0}</div><div class="metric-label">Paying Users</div><div class="metric-sub">Active subs</div></div>
+    <div class="metric"><div class="metric-icon">📋</div><div class="metric-val">${s.total_applications||0}</div><div class="metric-label">Applications</div><div class="metric-sub">All time</div></div>
+    <div class="metric"><div class="metric-icon">💼</div><div class="metric-val">${s.total_jobs||0}</div><div class="metric-label">Active Jobs</div></div>
+    <div class="metric"><div class="metric-icon">💰</div><div class="metric-val">KES ${((s.active_subscribers||0)*1200).toLocaleString()}</div><div class="metric-label">Est. MRR</div><div class="metric-sub">Growth plan avg</div></div>
+  `;
+}
+
+function renderRecentUsers() {
+  const recent = allUsers.slice(0, 6);
+  document.getElementById('recent-users').innerHTML = recent.length === 0
+    ? '<div class="loading">No users yet</div>'
+    : recent.map(u => `
+      <div class="table-row" style="grid-template-columns:1fr 0.6fr 0.7fr">
+        <div class="cell"><div style="font-size:0.82rem;font-weight:500">${u.name||'—'}</div><div style="font-size:0.72rem;color:var(--subtext)">${u.email}</div></div>
+        <span class="badge badge-${u.plan}">${u.plan}</span>
+        <div style="font-size:0.72rem;color:var(--subtext)">${new Date(u.created_at).toLocaleDateString()}</div>
+      </div>`).join('');
+}
+
+function renderRecentApps() {
+  const recent = allApps.slice(0, 6);
+  document.getElementById('recent-apps').innerHTML = recent.length === 0
+    ? '<div class="loading">No applications yet</div>'
+    : recent.map(a => `
+      <div class="table-row" style="grid-template-columns:1fr 1fr 0.6fr">
+        <div class="cell" style="font-size:0.82rem">${a.job_title}</div>
+        <div class="cell" style="font-size:0.75rem;color:var(--subtext)">${a.email}</div>
+        <span class="badge badge-${a.status}">${a.status}</span>
+      </div>`).join('');
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────────
+function renderUsers(users) {
+  document.getElementById('users-list').innerHTML = users.length === 0
+    ? '<div class="loading">No users found</div>'
+    : users.map((u, i) => `
+      <div class="table-row" style="grid-template-columns:2fr 1.5fr 0.8fr 0.8fr 1fr 0.6fr">
+        <div class="cell"><div style="font-weight:500">${u.name||'—'}</div><div style="font-size:0.72rem;color:var(--subtext)">${u.email}</div></div>
+        <div class="cell" style="color:var(--subtext);font-size:0.78rem">${new Date(u.created_at).toLocaleDateString()}</div>
+        <span class="badge badge-${u.plan}">${u.plan}</span>
+        <span class="badge badge-${u.subscription_status==='active'?'active':'inactive'}">${u.subscription_status}</span>
+        <div class="cell" style="font-size:0.78rem;color:var(--subtext)">${u.phone||'—'}</div>
+        <div class="cell" style="font-size:0.78rem;color:var(--subtext)">${allApps.filter(a=>a.email===u.email).length}</div>
+      </div>`).join('');
+}
+
+function filterUsers() {
+  const q = document.getElementById('user-search').value.toLowerCase();
+  renderUsers(allUsers.filter(u => (u.name||'').toLowerCase().includes(q) || u.email.toLowerCase().includes(q)));
+}
+
+// ── Applications ──────────────────────────────────────────────────────────────
+function renderApps(apps) {
+  document.getElementById('apps-list').innerHTML = apps.length === 0
+    ? '<div class="loading">No applications yet</div>'
+    : apps.map(a => `
+      <div class="table-row" style="grid-template-columns:2fr 1.5fr 1.5fr 0.8fr 1fr">
+        <div class="cell"><div style="font-size:0.82rem">${a.name||a.email}</div><div style="font-size:0.7rem;color:var(--subtext)">${a.email}</div></div>
+        <div class="cell">${a.job_title}</div>
+        <div class="cell" style="color:var(--subtext)">${a.company}</div>
+        <span class="badge badge-${a.status}">${a.status}</span>
+        <div class="cell" style="color:var(--subtext);font-size:0.78rem">${new Date(a.created_at).toLocaleDateString()}</div>
+      </div>`).join('');
+}
+
+function filterApps() {
+  const q = document.getElementById('app-search').value.toLowerCase();
+  renderApps(allApps.filter(a => (a.job_title||'').toLowerCase().includes(q) || (a.company||'').toLowerCase().includes(q)));
+}
+
+// ── Jobs ──────────────────────────────────────────────────────────────────────
+function renderJobs(jobs) {
+  document.getElementById('jobs-list').innerHTML = jobs.length === 0
+    ? '<div class="loading">No jobs yet. Add some above!</div>'
+    : jobs.map(j => `
+      <div class="table-row" style="grid-template-columns:2fr 1.5fr 1.5fr 0.8fr 0.8fr">
+        <div class="cell"><div style="font-weight:500">${j.title}</div></div>
+        <div class="cell" style="color:var(--subtext)">${j.company}</div>
+        <div class="cell" style="color:var(--subtext)">${j.location||'—'}</div>
+        <span class="badge" style="background:${j.remote?'rgba(0,230,118,0.15)':'rgba(144,202,249,0.1)'};color:${j.remote?'#00E676':'#90CAF9'}">${j.remote?'Yes':'No'}</span>
+        <button class="btn-danger" onclick="toggleJob(${j.id}, ${j.is_active})">${j.is_active?'Deactivate':'Activate'}</button>
+      </div>`).join('');
+}
+
+function filterJobs() {
+  const q = document.getElementById('job-search').value.toLowerCase();
+  renderJobs(allJobs.filter(j => j.title.toLowerCase().includes(q) || j.company.toLowerCase().includes(q)));
+}
+
+async function toggleJob(id, current) {
+  await apiFetch(`/admin/jobs/${id}/toggle`, { method: 'PATCH' });
+  toast(current ? '⏸ Job deactivated' : '✅ Job activated', 'success');
+  const res = await apiFetch('/admin/jobs');
+  allJobs = await res.json();
+  renderJobs(allJobs);
+}
+
+// ── Add Job ───────────────────────────────────────────────────────────────────
+async function addJob() {
+  const title   = document.getElementById('job-title').value.trim();
+  const company = document.getElementById('job-company').value.trim();
+  if (!title || !company) { toast('Title and company are required', 'error'); return; }
+
+  const body = {
+    title, company,
+    location:     document.getElementById('job-location').value.trim(),
+    salary:       document.getElementById('job-salary').value.trim(),
+    apply_email:  document.getElementById('job-email').value.trim(),
+    apply_url:    document.getElementById('job-url').value.trim(),
+    source:       document.getElementById('job-source').value.trim(),
+    remote:       document.getElementById('job-remote').value === '1',
+    description:  document.getElementById('job-description').value.trim(),
+    requirements: document.getElementById('job-requirements').value.trim(),
+  };
+
+  const res  = await apiFetch('/jobs', { method: 'POST', body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) { toast('❌ ' + data.error, 'error'); return; }
+
+  toast('✅ Job added successfully!', 'success');
+  ['job-title','job-company','job-location','job-salary','job-email','job-url','job-source','job-description','job-requirements'].forEach(id => document.getElementById(id).value = '');
+
+  const jobsRes = await apiFetch('/admin/jobs');
+  allJobs = await jobsRes.json();
+  renderJobs(allJobs);
+}
+</script>
+</body>
+</html>

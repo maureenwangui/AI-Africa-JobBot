@@ -1,4 +1,4 @@
-// routes/subscription.js — M-Pesa + Flutterwave Payment Integration
+// routes/subscription.js — M-Pesa + Paystack Payment Integration
 const express = require('express');
 const axios = require('axios');
 const getDb = require('../db/connection');
@@ -40,7 +40,7 @@ router.get('/plans', (req, res) => {
       '6mo':   { starter: 2400, growth: 5600, pro: 10600 },
     },
     currency: 'KES',
-    payment_methods: ['mpesa', 'flutterwave', 'card'],
+    payment_methods: ['mpesa', 'paystack', 'card'],
   });
 });
 
@@ -149,25 +149,25 @@ router.post('/mpesa/check', auth, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  FLUTTERWAVE  (Cards, Bank Transfer, M-Pesa, Airtel Money)
+//  PAYSTACK  (Cards, Bank Transfer, M-Pesa, Airtel Money)
 // ══════════════════════════════════════════════════════════════════════════════
 
-// POST /api/subscription/flutterwave/initiate
-router.post('/flutterwave/initiate', auth, async (req, res) => {
+// POST /api/subscription/paystack/initiate
+router.post('/paystack/initiate', auth, async (req, res) => {
   try {
     const { plan, billing_cycle = 'monthly', currency = 'KES' } = req.body;
 
     if (!PLANS[plan]) return res.status(400).json({ error: 'Invalid plan. Choose: starter, growth, or pro' });
     if (!BILLING_MULTIPLIER[billing_cycle]) return res.status(400).json({ error: 'Invalid billing cycle' });
 
-    const flwKey = process.env.FLUTTERWAVE_SECRET_KEY;
-    if (!flwKey) return res.status(400).json({ error: 'Flutterwave not configured. Add FLUTTERWAVE_SECRET_KEY to .env', code: 'FLW_NOT_CONFIGURED' });
+    const paystackKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!paystackKey) return res.status(400).json({ error: 'Paystack not configured. Add PAYSTACK_SECRET_KEY to .env', code: 'PAYSTACK_NOT_CONFIGURED' });
 
     const amount   = currency === 'KES' ? getPlanAmount(plan, billing_cycle, 'KES') : getPlanAmount(plan, billing_cycle, 'USD');
     const txRef    = `JOBBOT-${req.user.id}-${plan}-${Date.now()}`;
     const planInfo = PLANS[plan];
 
-    const { data } = await axios.post('https://api.flutterwave.com/v3/payments', {
+    const { data } = await axios.post('https://api.paystack.co/transaction/initialize', {
       tx_ref:       txRef,
       amount:       amount,
       currency:     currency,
@@ -188,18 +188,18 @@ router.post('/flutterwave/initiate', auth, async (req, res) => {
       },
       payment_options: 'card,mpesa,banktransfer,airtelke',
     }, {
-      headers: { Authorization: `Bearer ${flwKey}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${paystackKey}`, 'Content-Type': 'application/json' },
     });
 
     if (data.status !== 'success') {
-      return res.status(400).json({ error: data.message || 'Flutterwave request failed' });
+      return res.status(400).json({ error: data.message || 'Paystack request failed' });
     }
 
     // Save pending subscription
     const db = getDb();
     db.prepare(`
       INSERT INTO subscriptions (user_id, plan, billing_cycle, provider, status, amount, currency, tx_ref)
-      VALUES (?, ?, ?, 'flutterwave', 'pending', ?, ?, ?)
+      VALUES (?, ?, ?, 'paystack', 'pending', ?, ?, ?)
     `).run(req.user.id, plan, billing_cycle, amount, currency, txRef);
 
     res.json({
@@ -209,20 +209,20 @@ router.post('/flutterwave/initiate', auth, async (req, res) => {
       currency,
     });
   } catch (err) {
-    console.error('Flutterwave error:', err.response?.data || err.message);
+    console.error('Paystack error:', err.response?.data || err.message);
     res.status(500).json({ error: 'Payment initiation failed. Please try again.' });
   }
 });
 
-// POST /api/subscription/flutterwave/verify — verify after redirect
-router.post('/flutterwave/verify', auth, async (req, res) => {
+// POST /api/subscription/paystack/verify — verify after redirect
+router.post('/paystack/verify', auth, async (req, res) => {
   try {
     const { tx_ref, transaction_id } = req.body;
-    const flwKey = process.env.FLUTTERWAVE_SECRET_KEY;
+    const paystackKey = process.env.PAYSTACK_SECRET_KEY;
 
     const { data } = await axios.get(
-      `https://api.flutterwave.com/v3/transactions/${transaction_id}/verify`,
-      { headers: { Authorization: `Bearer ${flwKey}` } }
+      `https://api.paystack.co/transactions/${transaction_id}/verify`,
+      { headers: { Authorization: `Bearer ${paystackKey}` } }
     );
 
     const tx = data.data;
@@ -241,7 +241,7 @@ router.post('/flutterwave/verify', auth, async (req, res) => {
 
     db.prepare(`
       UPDATE subscriptions
-      SET status = 'active', start_date = datetime('now'), end_date = ?, flw_transaction_id = ?, updated_at = datetime('now')
+      SET status = 'active', start_date = datetime('now'), end_date = ?, paystack_transaction_id = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(endDate.toISOString(), transaction_id, sub.id);
 
@@ -251,7 +251,7 @@ router.post('/flutterwave/verify', auth, async (req, res) => {
 
     res.json({ status: 'active', plan: sub.plan, message: `${PLANS[sub.plan].name} plan activated!` });
   } catch (err) {
-    console.error('Flutterwave verify error:', err.response?.data || err.message);
+    console.error('Paystack verify error:', err.response?.data || err.message);
     res.status(500).json({ error: 'Verification failed' });
   }
 });

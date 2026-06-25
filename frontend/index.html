@@ -208,7 +208,7 @@ h1 span{color:var(--bright)}
           <li>Email notifications</li>
         </ul>
         <button class="plan-btn plan-btn-outline" style="margin-bottom:0.5rem" onclick="payWithMpesa('starter')">📱 Pay with M-Pesa</button>
-        <button class="plan-btn" style="background:rgba(255,140,0,0.15);color:#FFA040;border:1px solid rgba(255,140,0,0.3)" onclick="payWithFlutterwave('starter')">💳 Pay with Card</button>
+        <button class="plan-btn" style="background:rgba(255,140,0,0.15);color:#FFA040;border:1px solid rgba(255,140,0,0.3)" onclick="payWithPaystack('starter')">💳 Pay with Card</button>
       </div>
 
       <!-- GROWTH -->
@@ -225,7 +225,7 @@ h1 span{color:var(--bright)}
           <li>WhatsApp + email alerts</li>
         </ul>
         <button class="plan-btn plan-btn-solid" style="margin-bottom:0.5rem" onclick="payWithMpesa('growth')">📱 Pay with M-Pesa</button>
-        <button class="plan-btn" style="background:rgba(255,140,0,0.2);color:#FFA040;border:1px solid rgba(255,140,0,0.4)" onclick="payWithFlutterwave('growth')">💳 Pay with Card</button>
+        <button class="plan-btn" style="background:rgba(255,140,0,0.2);color:#FFA040;border:1px solid rgba(255,140,0,0.4)" onclick="payWithPaystack('growth')">💳 Pay with Card</button>
       </div>
 
       <!-- PRO -->
@@ -241,7 +241,7 @@ h1 span{color:var(--bright)}
           <li>"Apply Until Hired" mode</li>
         </ul>
         <button class="plan-btn plan-btn-outline" style="margin-bottom:0.5rem" onclick="payWithMpesa('pro')">📱 Pay with M-Pesa</button>
-        <button class="plan-btn" style="background:rgba(255,140,0,0.15);color:#FFA040;border:1px solid rgba(255,140,0,0.3)" onclick="payWithFlutterwave('pro')">💳 Pay with Card</button>
+        <button class="plan-btn" style="background:rgba(255,140,0,0.15);color:#FFA040;border:1px solid rgba(255,140,0,0.3)" onclick="payWithPaystack('pro')">💳 Pay with Card</button>
       </div>
     </div>
 
@@ -806,12 +806,12 @@ async function submitMpesa() {
   }
 }
 
-// ── FLUTTERWAVE ───────────────────────────────────────────────────────────────
-async function payWithFlutterwave(plan) {
+// ── PAYSTACK ───────────────────────────────────────────────────────────────
+async function payWithPaystack(plan) {
   if (!token) { show('login'); return; }
   toast('Connecting to payment gateway...', 'info');
   try {
-    const res = await apiFetch('/subscription/flutterwave/initiate', {
+    const res = await apiFetch('/subscription/paystack/initiate', {
       method: 'POST',
       body: JSON.stringify({ plan, billing_cycle: currentBilling, currency: 'KES' }),
     });
