@@ -183,7 +183,7 @@ h1 span{color:var(--bright)}
     <div style="display:flex;gap:0.75rem;justify-content:center;margin-bottom:1.5rem;flex-wrap:wrap">
       <div style="display:flex;align-items:center;gap:0.4rem;background:rgba(0,150,57,0.15);border:1px solid rgba(0,150,57,0.3);color:#00E676;padding:0.4rem 1rem;border-radius:100px;font-size:0.8rem;font-weight:600">📱 M-Pesa STK Push</div>
       <div style="display:flex;align-items:center;gap:0.4rem;background:rgba(255,140,0,0.15);border:1px solid rgba(255,140,0,0.3);color:#FFA040;padding:0.4rem 1rem;border-radius:100px;font-size:0.8rem;font-weight:600">💳 Card / Bank Transfer</div>
-      <div style="display:flex;align-items:center;gap:0.4rem;background:rgba(66,165,245,0.15);border:1px solid rgba(66,165,245,0.3);color:var(--bright);padding:0.4rem 1rem;border-radius:100px;font-size:0.8rem;font-weight:600">🔒 Secured by Flutterwave</div>
+      <div style="display:flex;align-items:center;gap:0.4rem;background:rgba(66,165,245,0.15);border:1px solid rgba(66,165,245,0.3);color:var(--bright);padding:0.4rem 1rem;border-radius:100px;font-size:0.8rem;font-weight:600">🔒 Secured by Paystack</div>
     </div>
 
     <!-- Billing toggle -->
@@ -246,7 +246,7 @@ h1 span{color:var(--bright)}
     </div>
 
     <p style="text-align:center;margin-top:1.5rem;color:var(--subtext);font-size:0.82rem;font-weight:300">
-      M-Pesa Paybill · Visa · Mastercard · Airtel Money · Bank Transfer · Cancel anytime · 🇰🇪 Made for Kenya
+      M-Pesa · Visa · Mastercard · Airtel Money · Bank Transfer · Paystack Secured · Cancel anytime · 🇰🇪 Made for Kenya
     </p>
   </div>
 </section>
@@ -806,29 +806,69 @@ async function submitMpesa() {
   }
 }
 
-// ── PAYSTACK ───────────────────────────────────────────────────────────────
+// ── PAYSTACK ──────────────────────────────────────────────────────────────────
 async function payWithPaystack(plan) {
   if (!token) { show('login'); return; }
-  toast('Connecting to payment gateway...', 'info');
+
+  // Step 1: Check server is reachable before trying payment
   try {
-    const res = await apiFetch('/subscription/paystack/initiate', {
+    const ping = await fetch('http://localhost:5000/health');
+    if (!ping.ok) throw new Error('Server not ready');
+  } catch {
+    toast('❌ Cannot reach server. Open CMD and run: node server.js', 'error');
+    return;
+  }
+
+  // Step 2: Check user is logged in with valid token
+  if (!token) {
+    toast('❌ Please log in first', 'error');
+    show('login');
+    return;
+  }
+
+  toast('Connecting to Paystack...', 'info');
+
+  try {
+    const res = await fetch('http://localhost:5000/api/subscription/paystack/initiate', {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token,
+      },
       body: JSON.stringify({ plan, billing_cycle: currentBilling, currency: 'KES' }),
     });
+
+    // Handle non-JSON error responses
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      throw new Error('Server returned unexpected response (status ' + res.status + ')');
+    }
+
     const data = await res.json();
+
     if (!res.ok) {
-      if (data.code === 'FLW_NOT_CONFIGURED') {
-        toast('⚠️ Flutterwave not configured yet. Add FLUTTERWAVE_SECRET_KEY to .env', 'error');
+      if (data.code === 'PAYSTACK_NOT_CONFIGURED') {
+        toast('⚠️ Paystack not set up yet. Add PAYSTACK_SECRET_KEY to your .env file and restart the server.', 'error');
         return;
       }
-      throw new Error(data.error || 'Payment initiation failed');
+      throw new Error(data.error || 'Payment initiation failed (status ' + res.status + ')');
     }
+
     if (data.payment_url) {
-      toast('Redirecting to payment page...', 'info');
-      window.location.href = data.payment_url;
+      toast('✅ Redirecting to Paystack checkout...', 'success');
+      setTimeout(() => { window.location.href = data.payment_url; }, 800);
+    } else {
+      throw new Error('No payment URL returned from server');
     }
+
   } catch (err) {
-    toast('❌ ' + err.message, 'error');
+    const msg = err.message;
+    if (msg.includes('fetch') || msg.includes('NetworkError') || msg.includes('Failed to fetch')) {
+      toast('❌ Network error — is node server.js still running? Check your CMD window.', 'error');
+    } else {
+      toast('❌ ' + msg, 'error');
+    }
+    console.error('Paystack initiate error:', err);
   }
 }
 

@@ -1,4 +1,4 @@
-// routes/webhooks.js — M-Pesa + Flutterwave Webhook Handlers
+// routes/webhooks.js — M-Pesa + Paystack Webhook Handlers
 const express = require('express');
 const crypto  = require('crypto');
 const getDb   = require('../db/connection');
@@ -12,7 +12,9 @@ function activateSubscription(db, sub) {
   const endDate = new Date();
   endDate.setMonth(endDate.getMonth() + months);
   db.prepare(`
-    UPDATE subscriptions SET status = 'active', start_date = datetime('now'), end_date = ?, updated_at = datetime('now') WHERE id = ?
+    UPDATE subscriptions
+    SET status = 'active', start_date = datetime('now'), end_date = ?, updated_at = datetime('now')
+    WHERE id = ?
   `).run(endDate.toISOString(), sub.id);
   db.prepare(`
     UPDATE users SET plan = ?, subscription_status = 'active', updated_at = datetime('now') WHERE id = ?
@@ -23,9 +25,10 @@ function activateSubscription(db, sub) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  M-PESA STK PUSH CALLBACK
 //  POST /api/webhooks/mpesa
+//  Safaricom sends this after user enters PIN
 // ══════════════════════════════════════════════════════════════════════════════
 router.post('/mpesa', express.json(), (req, res) => {
-  // Always respond 200 immediately to Safaricom
+  // Always respond 200 immediately — Safaricom requires this
   res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
 
   try {
@@ -37,66 +40,96 @@ router.post('/mpesa', express.json(), (req, res) => {
 
     const db  = getDb();
     const sub = db.prepare("SELECT * FROM subscriptions WHERE checkout_request_id = ?").get(CheckoutRequestID);
-    if (!sub) return console.warn('⚠️ No subscription found for:', CheckoutRequestID);
+    if (!sub) return console.warn('⚠️ No subscription found for CheckoutRequestID:', CheckoutRequestID);
 
     if (ResultCode === 0) {
-      // Payment successful
-      const items  = callback.CallbackMetadata?.Item || [];
-      const amount = items.find(i => i.Name === 'Amount')?.Value;
+      // Payment successful — extract metadata
+      const items    = callback.CallbackMetadata?.Item || [];
+      const amount   = items.find(i => i.Name === 'Amount')?.Value;
       const mpesaRef = items.find(i => i.Name === 'MpesaReceiptNumber')?.Value;
+      const phone    = items.find(i => i.Name === 'PhoneNumber')?.Value;
 
       db.prepare(`
-        UPDATE subscriptions SET mpesa_receipt = ?, amount_paid = ?, updated_at = datetime('now') WHERE id = ?
-      `).run(mpesaRef, amount, sub.id);
+        UPDATE subscriptions
+        SET mpesa_receipt = ?, amount_paid = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(mpesaRef || null, amount || null, sub.id);
 
       activateSubscription(db, sub);
-      console.log(`💰 M-Pesa payment received: KES ${amount}, Receipt: ${mpesaRef}`);
+      console.log(`💰 M-Pesa payment: KES ${amount} | Receipt: ${mpesaRef} | Phone: ${phone}`);
     } else {
-      // Payment failed or cancelled
+      // Payment failed or cancelled by user
       db.prepare("UPDATE subscriptions SET status = 'failed', updated_at = datetime('now') WHERE id = ?").run(sub.id);
       console.log(`❌ M-Pesa payment failed: ${ResultDesc}`);
     }
   } catch (err) {
-    console.error('M-Pesa webhook error:', err.message);
+    console.error('M-Pesa webhook processing error:', err.message);
   }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  FLUTTERWAVE WEBHOOK
-//  POST /api/webhooks/flutterwave
+//  PAYSTACK WEBHOOK
+//  POST /api/webhooks/paystack
+//  Paystack sends this after successful charge
+//  Docs: https://paystack.com/docs/payments/webhooks/
 // ══════════════════════════════════════════════════════════════════════════════
-router.post('/flutterwave', express.json(), (req, res) => {
-  // Verify webhook signature
-  const hash      = req.headers['verif-hash'];
-  const secretHash = process.env.FLUTTERWAVE_WEBHOOK_HASH;
-
-  if (secretHash && hash !== secretHash) {
-    console.warn('⚠️ Invalid Flutterwave webhook signature');
-    return res.status(401).json({ error: 'Invalid signature' });
-  }
-
-  res.sendStatus(200);
-
+router.post('/paystack', express.json(), (req, res) => {
   try {
+    // Verify webhook signature using HMAC SHA512
+    const secret    = process.env.PAYSTACK_SECRET_KEY;
+    const signature = req.headers['x-paystack-signature'];
+
+    if (secret && signature) {
+      const hash = crypto
+        .createHmac('sha512', secret)
+        .update(JSON.stringify(req.body))
+        .digest('hex');
+
+      if (hash !== signature) {
+        console.warn('⚠️ Invalid Paystack webhook signature — rejected');
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
+    }
+
+    // Always respond 200 to Paystack immediately
+    res.sendStatus(200);
+
     const { event, data } = req.body;
-    console.log(`📨 Flutterwave webhook: ${event}`);
+    console.log(`📨 Paystack webhook: ${event}`);
 
-    if (event === 'charge.completed' && data.status === 'successful') {
-      const db  = getDb();
-      const sub = db.prepare("SELECT * FROM subscriptions WHERE tx_ref = ?").get(data.tx_ref);
-      if (!sub) return console.warn('⚠️ No subscription found for tx_ref:', data.tx_ref);
+    const db = getDb();
 
-      if (sub.status === 'active') return; // Already activated
+    if (event === 'charge.success') {
+      const reference = data.reference;
+      const sub = db.prepare("SELECT * FROM subscriptions WHERE tx_ref = ?").get(reference);
 
+      if (!sub) {
+        return console.warn('⚠️ No subscription found for reference:', reference);
+      }
+
+      if (sub.status === 'active') {
+        return console.log('ℹ️ Subscription already active — skipping');
+      }
+
+      // Store Paystack transaction ID
       db.prepare(`
-        UPDATE subscriptions SET flw_transaction_id = ?, amount_paid = ?, updated_at = datetime('now') WHERE id = ?
-      `).run(data.id, data.amount, sub.id);
+        UPDATE subscriptions
+        SET flw_transaction_id = ?, amount_paid = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(String(data.id), data.amount / 100, sub.id);
 
       activateSubscription(db, sub);
-      console.log(`💰 Flutterwave payment: ${data.currency} ${data.amount} from ${data.customer?.email}`);
+      console.log(`💰 Paystack payment: ${data.currency} ${data.amount / 100} from ${data.customer?.email}`);
     }
+
+    if (event === 'subscription.disable' || event === 'subscription.expiry_card') {
+      // Handle subscription issues
+      console.log(`⚠️ Paystack subscription issue: ${event}`);
+    }
+
   } catch (err) {
-    console.error('Flutterwave webhook error:', err.message);
+    console.error('Paystack webhook error:', err.message);
+    // Don't send error response — Paystack already got 200
   }
 });
 
