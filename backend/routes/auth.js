@@ -116,7 +116,7 @@ router.post('/reset-password', async (req, res) => {
 // GET /api/auth/me
 router.get('/me', auth, (req, res) => {
   const db = getDb();
-  const user = db.prepare('SELECT id, email, name, phone, plan, subscription_status, created_at FROM users WHERE id = ?').get(req.user.id);
+  const user = db.prepare('SELECT id, email, name, phone, plan, subscription_status, role, created_at FROM users WHERE id = ?').get(req.user.id);
   res.json(user);
 });
 

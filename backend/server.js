@@ -14,7 +14,13 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // ─── Security ────────────────────────────────────────────────────────────────
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false
+  })
+);
+
 app.use(cors({
   origin: function(origin, callback) {
     // Allow requests with no origin (mobile apps, curl, Postman)
@@ -55,6 +61,9 @@ app.use(express.urlencoded({ extended: true }));
 
 // ─── Static (CV uploads) ─────────────────────────────────────────────────────
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Serve frontend
+app.use(express.static(path.join(__dirname, '../frontend')));
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 app.use('/api/auth',          require('./routes/auth'));
