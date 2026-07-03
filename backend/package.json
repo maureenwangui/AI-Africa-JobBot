@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Africa JobBot AI - Production MVP Backend",
   "main": "server.js",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
