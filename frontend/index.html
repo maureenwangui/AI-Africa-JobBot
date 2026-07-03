@@ -398,7 +398,7 @@ h1 span{color:var(--bright)}
 ════════════════════════════════════════════════════════════ -->
 <script>
 // ── CONFIG ───────────────────────────────────────────────────────────────────
-const API = 'http://localhost:5000/api'; // Change to your Render URL in production
+const API = 'https://ai-africa-jobbot.onrender.com/api'; // Change to your Render URL in production
 
 // ── STATE ────────────────────────────────────────────────────────────────────
 let currentBilling = 'monthly';
@@ -408,7 +408,7 @@ let currentUser = null;
 // ── INIT ─────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   // Check backend connection on load
-  fetch('http://localhost:5000/health')
+  fetch('https://ai-africa-jobbot.onrender.com/api/health')
     .then(r => r.ok ? console.log('✅ Backend connected') : showServerError())
     .catch(() => showServerError());
 
@@ -829,7 +829,7 @@ async function payWithPaystack(plan) {
   toast('Connecting to Paystack...', 'info');
 
   try {
-    const res = await fetch('http://localhost:5000/api/subscription/paystack/initiate', {
+    const res = await fetch('https://ai-africa-jobbot.onrender.com/api/subscription/paystack/initiate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
