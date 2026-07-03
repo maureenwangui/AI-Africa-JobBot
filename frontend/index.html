@@ -421,7 +421,7 @@ window.addEventListener('DOMContentLoaded', () => {
 function showServerError() {
   const banner = document.createElement('div');
   banner.style.cssText = 'position:fixed;top:65px;left:0;right:0;background:#B71C1C;color:#fff;padding:0.75rem 1.5rem;text-align:center;font-size:0.88rem;z-index:9999;';
-  banner.innerHTML = '⚠️ Cannot connect to backend. Open CMD and run: <strong>cd backend && node server.js</strong>';
+  banner.innerHTML = '⚠️ Unable to connect to the server. Please check your internet connection or try again later.';
   document.body.appendChild(banner);
 }
 
@@ -812,7 +812,7 @@ async function payWithPaystack(plan) {
 
   // Step 1: Check server is reachable before trying payment
   try {
-    const ping = await fetch('http://localhost:5000/health');
+    const ping = await fetch('https://ai-africa-jobbot.onrender.com/api/health');
     if (!ping.ok) throw new Error('Server not ready');
   } catch {
     toast('❌ Cannot reach server. Open CMD and run: node server.js', 'error');
