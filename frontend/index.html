@@ -408,7 +408,7 @@ let currentUser = null;
 // ── INIT ─────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   // Check backend connection on load
-  fetch('https://ai-africa-jobbot.onrender.com/api/health')
+  fetch('https://ai-africa-jobbot.onrender.com/health')
     .then(r => r.ok ? console.log('✅ Backend connected') : showServerError())
     .catch(() => showServerError());
 
@@ -812,10 +812,10 @@ async function payWithPaystack(plan) {
 
   // Step 1: Check server is reachable before trying payment
   try {
-    const ping = await fetch('https://ai-africa-jobbot.onrender.com/api/health');
+    const ping = await fetch('https://ai-africa-jobbot.onrender.com/health');
     if (!ping.ok) throw new Error('Server not ready');
   } catch {
-    toast('❌ Cannot reach server. Open CMD and run: node server.js', 'error');
+    toast('❌ Cannot connect to the server. Please try again in a few moments.', 'error');
     return;
   }
 
