@@ -381,7 +381,7 @@ select.fi option{background:#041B3D}
 
 <script>
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-const API = 'http://localhost:5000/api';
+const API = 'https://ai-africa-jobbot.onrender.com';
 let TOK = null;
 let allU=[], allA=[], allJ=[], allS=[];
 let pmUid=null;
@@ -422,7 +422,7 @@ async function doAdminLogin() {
   try {
     // Check server first
     try {
-      await fetch('http://localhost:5000/health');
+      await fetch('https://ai-africa-jobbot.onrender.com/health');
     } catch {
       throw new Error('Cannot reach server. Make sure node server.js is running in CMD.');
     }
