@@ -381,7 +381,7 @@ select.fi option{background:#041B3D}
 
 <script>
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-const API = 'https://ai-africa-jobbot.onrender.com/';
+const API = 'https://ai-africa-jobbot.onrender.com/api';
 let TOK = null;
 let allU=[], allA=[], allJ=[], allS=[];
 let pmUid=null;
@@ -428,12 +428,24 @@ async function doAdminLogin() {
     }
 
     const res  = await req('/auth/login', {method:'POST', body:JSON.stringify({email, password:pass})});
+    
+    const contentType = res.headers.get('content-type') || '';
+
+    if (!contentType.includes('application/json')) {
+       throw new Error('Server returned an invalid response.');
+    }
     const data = await res.json();
+
     if (!res.ok) throw new Error(data.error || 'Login failed');
 
     // Check admin role
     TOK = data.token;
     const meRes  = await req('/auth/me');
+    
+    if (!meRes.headers.get('content-type')?.includes('application/json')) {
+      throw new Error('Invalid response from server.');
+    }
+
     const me     = await meRes.json();
 
     if (me.role !== 'admin') {
@@ -474,7 +486,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     TOK = saved;
     try {
       const r = await req('/auth/me');
+
+      if (!r.headers.get('content-type')?.includes('application/json')) {
+        throw new Error('Invalid server response');
+      }
       const u = await r.json();
+      
       if (r.ok && u.role === 'admin') {
         document.getElementById('tbar-user').textContent = '👤 ' + (u.name || u.email);
         document.getElementById('login-screen').style.display = 'none';
@@ -482,7 +499,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         loadAll();
         return;
       }
-    } catch {}
+    } catch (e) {
+      console.error('Error occurred while fetching user data:', e);
+    }
     TOK = null;
     localStorage.removeItem('admin_token');
   }
@@ -506,11 +525,27 @@ async function loadAll() {
       req('/admin/jobs'),
       req('/admin/subscriptions'),
     ]);
+
+    if (!sr.headers.get('content-type')?.includes('application/json')) {
+      throw new Error('Stats endpoint returned invalid data.');
+    }
     const stats = await sr.json();
-    allU = ur.ok  ? await ur.json()  : [];
-    allA = ar.ok  ? await ar.json()  : [];
-    allJ = jr.ok  ? await jr.json()  : [];
-    allS = sr2.ok ? await sr2.json() : [];
+
+    allU = (ur.ok && ur.headers.get('content-type')?.includes('application/json'))
+      ? await ur.json()
+      : [];
+
+    allA = (ar.ok && ar.headers.get('content-type')?.includes('application/json'))
+      ? await ar.json()
+      : [];
+
+    allJ = (jr.ok && jr.headers.get('content-type')?.includes('application/json'))
+      ? await jr.json()
+      : [];
+
+    allS = (sr2.ok && sr2.headers.get('content-type')?.includes('application/json'))
+      ? await sr2.json()
+      : [];
 
     if (sr.ok) { renderStats(stats); renderBars(stats); }
     renderRecentU(); renderRecentA();
