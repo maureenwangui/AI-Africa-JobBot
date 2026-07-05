@@ -6,7 +6,7 @@ services:
     plan: free
     rootDir: backend
     buildCommand: npm install
-    startCommand: node server.js
+    startCommand: node db/init.js && node migrate.js && node server.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
@@ -37,3 +37,19 @@ services:
         sync: false
       - key: DB_PATH
         value: ./db/jobbot.sqlite
+      - key: FRONTEND_URL
+        value: https://africa-jobbot.netlify.app
+      - key: BACKEND_URL
+        value: https://ai-africa-jobbot.onrender.com
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: MPESA_CONSUMER_KEY
+        sync: false
+      - key: MPESA_CONSUMER_SECRET
+        sync: false
+      - key: MPESA_SHORTCODE
+        sync: false
+      - key: MPESA_PASSKEY
+        sync: false
+      - key: MPESA_ENV
+        value: sandbox
