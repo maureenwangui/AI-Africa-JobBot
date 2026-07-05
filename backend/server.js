@@ -23,9 +23,11 @@ app.use(
 
 app.use(cors({
   origin: function(origin, callback) {
+     console.log("Incoming Origin:", origin);
+
     // Allow requests with no origin (mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
-    const allowed = [
+    console.log("Allowed Origins:", [
       process.env.FRONTEND_URL,
       "https://africa-jobbot.netlify.app",
       'http://localhost:3000',
@@ -35,7 +37,7 @@ app.use(cors({
       'http://127.0.0.1:5501',
       'http://localhost:8080',
       'http://localhost:4200',
-    ].filter(Boolean);
+    ].filter(Boolean));
     if (allowed.indexOf(origin) !== -1) return callback(null, true);
     // Also allow any localhost port in development
     if (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
