@@ -1,51 +1,89 @@
 // services/cronJobs.js
 const cron = require('node-cron');
-const getDb = require('../db/connection');
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
 const matchingService = require('./matchingService');
 const notificationService = require('./notificationService');
 const emailService = require('./emailService');
 
-// Run job matching for all active users — every 6 hours
+// ══════════════════════════════════════════════════════════════════════════════
+//  JOB MATCHING — every 6 hours
+// ══════════════════════════════════════════════════════════════════════════════
 cron.schedule('0 */6 * * *', async () => {
   console.log('🤖 Running job matching cycle...');
-  const db = getDb();
 
-  const activeUsers = db.prepare(`
-    SELECT u.id, u.email, u.phone, u.name, u.plan,
-           p.skills, p.keywords, p.preferred_location, p.remote_preference, p.preferred_roles
-    FROM users u
-    JOIN profiles p ON u.id = p.user_id
-    WHERE u.subscription_status IN ('active', 'free')
-    AND p.cv_filename IS NOT NULL
-  `).all();
+  // Replaces the JOIN query — flatten profile fields onto each user object
+  // so matchingService.matchJobsToProfile receives the same shape as before
+  const rawUsers = await prisma.user.findMany({
+    where: {
+      subscription_status: { in: ['active', 'free'] },
+      profile: { cv_filename: { not: null } },
+    },
+    select: {
+      id: true, email: true, phone: true, name: true, plan: true,
+      profile: {
+        select: {
+          skills: true, keywords: true, preferred_location: true,
+          remote_preference: true, preferred_roles: true,
+        },
+      },
+    },
+  });
 
-  const jobs = db.prepare('SELECT * FROM jobs WHERE is_active = 1 ORDER BY created_at DESC LIMIT 500').all();
+  // Flatten: { ...user, ...user.profile } — mirrors the original flat JOIN row
+  const activeUsers = rawUsers.map(({ profile, ...user }) => ({ ...user, ...profile }));
+
+  const jobs = await prisma.job.findMany({
+    where:   { is_active: true },
+    orderBy: { created_at: 'desc' },
+    take:    500,
+  });
 
   for (const user of activeUsers) {
     try {
-      const matches = await matchingService.matchJobsToProfile(user, jobs);
+      const matches    = await matchingService.matchJobsToProfile(user, jobs);
       const topMatches = matches.filter(j => j.match_score >= 60).slice(0, 5);
 
       if (topMatches.length > 0) {
-        // Auto-queue applications for pro users
         if (user.plan === 'pro') {
           const month = new Date().toISOString().slice(0, 7);
-          const usage = db.prepare('SELECT applications_used FROM usage_limits WHERE user_id = ? AND month = ?').get(user.id, month);
-          const used = usage?.applications_used || 0;
+
+          const usageRecord = await prisma.usageLimit.findFirst({
+            where:  { user_id: user.id, month },
+            select: { applications_used: true },
+          });
+          const used = usageRecord?.applications_used || 0;
 
           if (used < 200) {
             for (const job of topMatches.slice(0, 3)) {
-              const already = db.prepare('SELECT id FROM applications WHERE user_id = ? AND job_id = ?').get(user.id, job.id);
+              const already = await prisma.application.findFirst({
+                where:  { user_id: user.id, job_id: job.id },
+                select: { id: true },
+              });
               if (!already) {
-                db.prepare(`
-                  INSERT INTO applications (user_id, job_id, match_score, status, applied_at)
-                  VALUES (?, ?, ?, 'sent', datetime('now'))
-                `).run(user.id, job.id, job.match_score);
+                await prisma.application.create({
+                  data: {
+                    user_id:     user.id,
+                    job_id:      job.id,
+                    match_score: job.match_score,
+                    status:      'sent',
+                    applied_at:  new Date(),
+                  },
+                });
 
-                db.prepare(`
-                  INSERT INTO usage_limits (user_id, month, applications_used) VALUES (?, ?, 1)
-                  ON CONFLICT(user_id, month) DO UPDATE SET applications_used = applications_used + 1
-                `).run(user.id, month);
+                // Replaces ON CONFLICT SQL — atomic upsert with increment
+                // Requires @@unique([user_id, month]) on UsageLimit in schema
+                await prisma.usageLimit.upsert({
+                  where:  { user_id_month: { user_id: user.id, month } },
+                  update: { applications_used: { increment: 1 } },
+                  create: {
+                    user_id:           user.id,
+                    month,
+                    applications_used: 1,
+                    cv_used:           0,
+                    cover_letters_used: 0,
+                  },
+                });
 
                 notificationService.sendApplicationAlert(user, job).catch(console.error);
               }
@@ -60,24 +98,48 @@ cron.schedule('0 */6 * * *', async () => {
       console.error(`Matching error for user ${user.id}:`, err.message);
     }
   }
+
   console.log(`✅ Job matching done for ${activeUsers.length} users`);
 });
 
-// Send daily summary emails — every day at 8am Nairobi time (UTC+3 = 5am UTC)
+// ══════════════════════════════════════════════════════════════════════════════
+//  DAILY SUMMARY EMAILS — every day at 8am Nairobi time (UTC+3 = 5am UTC)
+// ══════════════════════════════════════════════════════════════════════════════
 cron.schedule('0 5 * * *', async () => {
   console.log('📧 Sending daily summaries...');
-  const db = getDb();
-  const users = db.prepare("SELECT id, email, name, phone, plan FROM users WHERE subscription_status IN ('active', 'free')").all();
+
+  const users = await prisma.user.findMany({
+    where: {
+      subscription_status: { in: ['active', 'free'] },
+    },
+    select: {
+      id: true, email: true, name: true, phone: true, plan: true,
+    },
+  });
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
   for (const user of users) {
     try {
-      const stats = {
-        total_applications: db.prepare("SELECT COUNT(*) as c FROM applications WHERE user_id = ?").get(user.id).c,
-        new_matches: db.prepare("SELECT COUNT(*) as c FROM applications WHERE user_id = ? AND date(created_at) = date('now')").get(user.id).c,
-      };
-      emailService.sendDailySummary(user, stats).catch(console.error);
-    } catch {}
+      const [totalApplications, newMatches] = await Promise.all([
+        prisma.application.count({
+          where: { user_id: user.id },
+        }),
+        prisma.application.count({
+          where: { user_id: user.id, created_at: { gte: today } },
+        }),
+      ]);
+
+      await emailService.sendDailySummary(user, {
+        total_applications: totalApplications,
+        new_matches:        newMatches,
+      });
+    } catch (err) {
+      console.error(err);
+    }
   }
+
   console.log('✅ Daily summaries sent');
 });
 

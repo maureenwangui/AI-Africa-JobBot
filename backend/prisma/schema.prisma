@@ -1,0 +1,1196 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum SubscriptionPlan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  BUSINESS
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  SUSPENDED
+}
+
+enum PaymentProvider {
+  MPESA
+  PAYSTACK
+  FLUTTERWAVE
+  STRIPE
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum JobStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+  EXPIRED
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERNSHIP
+  FREELANCE
+  TEMPORARY
+}
+
+enum RemoteType {
+  REMOTE
+  HYBRID
+  ONSITE
+}
+
+enum ExperienceLevel {
+  ENTRY
+  JUNIOR
+  MID
+  SENIOR
+  LEAD
+  EXECUTIVE
+}
+
+enum ResumeStatus {
+  ORIGINAL
+  OPTIMIZED
+}
+
+enum ApplicationStatus {
+  QUEUED
+  MATCHED
+  APPLYING
+  APPLIED
+  VIEWED
+  SHORTLISTED
+  INTERVIEW
+  OFFER
+  HIRED
+  REJECTED
+  FAILED
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  RESCHEDULED
+}
+
+enum CompanyResponseStatus {
+  RECEIVED
+  SHORTLISTED
+  INTERVIEW
+  OFFER
+  REJECTED
+}
+
+enum NotificationChannel {
+  EMAIL
+  WHATSAPP
+  SMS
+  DASHBOARD
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
+enum AIActivityType {
+  PROFILE_GENERATION
+  CV_ANALYSIS
+  CV_OPTIMIZATION
+  COVER_LETTER
+  JOB_MATCHING
+  JOB_RECOMMENDATION
+  INTERVIEW_PREP
+  CAREER_ADVICE
+}
+
+enum AIActivityStatus {
+  SUCCESS
+  FAILED
+  PROCESSING
+}
+
+model User {
+  id String @id @default(cuid())
+
+  email String @unique
+
+  password String
+
+  name String?
+
+  phone String?
+
+  role UserRole @default(USER)
+
+  isVerified Boolean @default(false)
+
+  verificationToken String?
+
+  resetToken String?
+
+  resetTokenExpiry DateTime?
+
+  lastLogin DateTime?
+
+  plan SubscriptionPlan @default(FREE)
+
+  subscriptionStatus SubscriptionStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  profile Profile?
+
+  sessions Session[]
+
+  subscription Subscription?
+
+  usage Usage[]
+
+  resumes Resume[]
+
+  coverLetters CoverLetter[]
+
+  applications Application[]
+
+  jobMatches JobMatch[]
+
+  recommendations JobRecommendation[]
+
+  savedJobs SavedJob[]
+
+  notifications Notification[]
+
+  whatsappLogs WhatsAppLog[]
+
+  emailLogs EmailLog[]
+
+  payments Payment[]
+
+  aiActivities AIActivity[]
+
+  aiProfile AIProfile?
+
+  supportTickets SupportTicket[]
+
+  referrals Referral[]
+
+  adminLogs AdminLog[]
+
+  auditLogs AuditLog[]
+
+  @@index([email])
+  @@index([role])
+  @@index([plan])
+  @@map("users")
+}
+
+model Profile {
+  id String @id @default(cuid())
+
+  userId String @unique
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  headline String?
+
+  summary String?
+
+  skills String?
+
+  experience String?
+
+  education String?
+
+  certifications String?
+
+  languages String?
+
+  preferredRoles String?
+
+  preferredLocations String?
+
+  expectedSalary Int?
+
+  remotePreference Boolean @default(true)
+
+  linkedin String?
+
+  github String?
+
+  portfolio String?
+
+  profileScore Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  @@map("profiles")
+}
+
+model Session {
+  id String @id @default(cuid())
+
+  userId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  token String @unique
+
+  device String?
+
+  browser String?
+
+  ipAddress String?
+
+  location String?
+
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@map("sessions")
+}
+
+model Subscription {
+  id String @id @default(cuid())
+
+  userId String @unique
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  plan SubscriptionPlan
+
+  status SubscriptionStatus
+
+  billingCycle String
+
+  applicationsLimit Int
+
+  startDate DateTime?
+
+  endDate DateTime?
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  payments Payment[]
+
+  @@map("subscriptions")
+}
+
+model Usage {
+  id String @id @default(cuid())
+
+  userId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  month String
+
+  applicationsUsed Int @default(0)
+
+  resumesOptimized Int @default(0)
+
+  coverLettersGenerated Int @default(0)
+
+  aiCreditsUsed Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, month])
+  @@map("usage")
+}
+
+model Company {
+  id String @id @default(cuid())
+
+  name String @unique
+
+  website String?
+
+  email String?
+
+  phone String?
+
+  logo String?
+
+  description String?
+
+  industry String?
+
+  companySize String?
+
+  headquarters String?
+
+  country String?
+
+  city String?
+
+  verified Boolean @default(false)
+
+  foundedYear Int?
+
+  linkedinUrl String?
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  jobs Job[]
+
+  recruiters Recruiter[]
+
+  @@index([industry])
+  @@index([country])
+  @@index([verified])
+  @@map("companies")
+}
+
+model Recruiter {
+  id String @id @default(cuid())
+
+  companyId String
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  firstName String
+
+  lastName String
+
+  title String?
+
+  email String?
+
+  phone String?
+
+  linkedin String?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([email])
+  @@map("recruiters")
+}
+
+model Job {
+  id String @id @default(cuid())
+
+  companyId String
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  title String
+
+  description String
+
+  responsibilities String?
+
+  requirements String?
+
+  benefits String?
+
+  skillsRequired String?
+
+  educationLevel String?
+
+  experienceLevel ExperienceLevel?
+
+  employmentType EmploymentType
+
+  remoteType RemoteType
+
+  salaryMin Int?
+
+  salaryMax Int?
+
+  currency String @default("KES")
+
+  vacancies Int @default(1)
+
+  country String?
+
+  city String?
+
+  location String?
+
+  applicationDeadline DateTime?
+
+  applyUrl String?
+
+  source String?
+
+  status JobStatus @default(ACTIVE)
+
+  featured Boolean @default(false)
+
+  views Int @default(0)
+
+  applicationsCount Int @default(0)
+
+  postedAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  savedJobs SavedJob[]
+
+  jobMatches JobMatch[]
+
+  recommendations JobRecommendation[]
+
+  applications Application[]
+
+  resumeVersions ResumeVersion[]
+
+  coverLetters CoverLetter[]
+
+  @@index([companyId])
+  @@index([title])
+  @@index([country])
+  @@index([city])
+  @@index([status])
+  @@index([employmentType])
+  @@index([experienceLevel])
+  @@map("jobs")
+}
+
+model SavedJob {
+  id String @id @default(cuid())
+
+  userId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  jobId String
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, jobId])
+  @@index([userId])
+  @@index([jobId])
+  @@map("saved_jobs")
+}
+
+model JobMatch {
+  id String @id @default(cuid())
+
+  userId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  jobId String
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  score Float
+
+  strengths String?
+
+  weaknesses String?
+
+  missingSkills String?
+
+  aiReason String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, jobId])
+  @@index([score])
+  @@map("job_matches")
+}
+
+model JobRecommendation {
+  id String @id @default(cuid())
+
+  userId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  jobId String
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  recommendationScore Float
+
+  aiExplanation String?
+
+  viewed Boolean @default(false)
+
+  clicked Boolean @default(false)
+
+  applied Boolean @default(false)
+
+  recommendedAt DateTime @default(now())
+
+  @@unique([userId, jobId])
+  @@index([recommendationScore])
+  @@map("job_recommendations")
+}
+
+model Resume {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  originalName String
+
+  fileUrl String
+
+  fileType String?
+
+  fileSize Int?
+
+  extractedText String?
+
+  parsedSuccessfully Boolean @default(false)
+
+  uploadSource String?
+
+  language String?
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  versions ResumeVersion[]
+
+  analyses CVAnalysis[]
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("resumes")
+}
+
+model ResumeVersion {
+  id String @id @default(cuid())
+
+  resumeId String
+  resume   Resume @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+
+  jobId String?
+  job   Job?    @relation(fields: [jobId], references: [id])
+
+  versionNumber Int
+
+  status ResumeStatus
+
+  optimizedText String
+
+  atsScore Int?
+
+  keywordsAdded String?
+
+  improvements String?
+
+  aiSummary String?
+
+  createdAt DateTime @default(now())
+
+  applications Application[]
+
+  @@unique([resumeId, versionNumber])
+  @@index([resumeId])
+  @@map("resume_versions")
+}
+
+model CVAnalysis {
+  id String @id @default(cuid())
+
+  resumeId String
+  resume   Resume @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+
+  overallScore Int
+
+  atsScore Int
+
+  grammarScore Int
+
+  readabilityScore Int
+
+  formattingScore Int
+
+  keywordScore Int
+
+  professionalismScore Int
+
+  strengths String?
+
+  weaknesses String?
+
+  missingSkills String?
+
+  recommendations String?
+
+  analyzedByAI Boolean @default(true)
+
+  aiModel String?
+
+  analyzedAt DateTime @default(now())
+
+  @@index([overallScore])
+  @@map("cv_analysis")
+}
+
+model CoverLetter {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  jobId String?
+  job   Job?    @relation(fields: [jobId], references: [id])
+
+  title String?
+
+  companyName String?
+
+  hiringManager String?
+
+  content String
+
+  aiReason String?
+
+  tone String?
+
+  language String?
+
+  createdAt DateTime @default(now())
+
+  applications Application[]
+
+  @@index([userId])
+  @@index([jobId])
+  @@map("cover_letters")
+}
+
+model AIActivity {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  activityType AIActivityType
+
+  status AIActivityStatus
+
+  aiModel String?
+
+  prompt String?
+
+  response String?
+
+  tokensUsed Int?
+
+  processingTime Float?
+
+  estimatedCost Float?
+
+  ipAddress String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([activityType])
+  @@index([createdAt])
+  @@map("ai_activity")
+}
+
+model AIProfile {
+  id String @id @default(cuid())
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  professionalTitle String?
+
+  careerSummary String?
+
+  coreSkills String?
+
+  softSkills String?
+
+  industries String?
+
+  recommendedRoles String?
+
+  strengths String?
+
+  weaknesses String?
+
+  aiConfidence Float?
+
+  lastGeneratedAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  @@map("ai_profiles")
+}
+
+model Application {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  jobId String
+  job   Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  resumeVersionId String?
+  resumeVersion   ResumeVersion? @relation(fields: [resumeVersionId], references: [id])
+
+  coverLetterId String?
+  coverLetter   CoverLetter? @relation(fields: [coverLetterId], references: [id])
+
+  status ApplicationStatus @default(QUEUED)
+
+  matchScore Float?
+
+  appliedAutomatically Boolean @default(false)
+
+  recruiterEmail String?
+
+  recruiterPhone String?
+
+  applicationUrl String?
+
+  companyReference String?
+
+  aiReason String?
+
+  notes String?
+
+  viewedAt DateTime?
+
+  appliedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  interviews Interview[]
+
+  responses CompanyResponse[]
+
+  timeline ApplicationTimeline[]
+
+  @@index([userId])
+  @@index([jobId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("applications")
+}
+
+model ApplicationTimeline {
+  id String @id @default(cuid())
+
+  applicationId String
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  title String
+
+  description String?
+
+  status ApplicationStatus?
+
+  createdAt DateTime @default(now())
+
+  @@index([applicationId])
+  @@map("application_timeline")
+}
+
+model Interview {
+  id String @id @default(cuid())
+
+  applicationId String
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  status InterviewStatus
+
+  round Int @default(1)
+
+  interviewDate DateTime?
+
+  interviewType String?
+
+  interviewerName String?
+
+  interviewerEmail String?
+
+  interviewerPhone String?
+
+  meetingLink String?
+
+  location String?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  @@index([applicationId])
+  @@map("interviews")
+}
+
+model CompanyResponse {
+  id String @id @default(cuid())
+
+  applicationId String
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  status CompanyResponseStatus
+
+  recruiterName String?
+
+  recruiterEmail String?
+
+  recruiterPhone String?
+
+  message String?
+
+  salaryOffered Float?
+
+  currency String? @default("KES")
+
+  offerLetterUrl String?
+
+  responseDate DateTime?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([applicationId])
+  @@index([status])
+  @@map("company_responses")
+}
+
+model Payment {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  provider PaymentProvider
+
+  status PaymentStatus @default(PENDING)
+
+  amount Float
+
+  currency String @default("KES")
+
+  transactionRef String? @unique
+
+  checkoutRequestId String?
+
+  receiptNumber String?
+
+  phoneNumber String?
+
+  payerName String?
+
+  paymentDate DateTime?
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([provider])
+  @@index([status])
+  @@map("payments")
+}
+
+model Notification {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title String
+
+  message String
+
+  channel NotificationChannel
+
+  status NotificationStatus @default(PENDING)
+
+  isRead Boolean @default(false)
+
+  sentAt DateTime?
+
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("notifications")
+}
+
+model WhatsAppLog {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  phone String
+
+  message String
+
+  provider String?
+
+  status NotificationStatus @default(PENDING)
+
+  externalId String?
+
+  sentAt DateTime?
+
+  deliveredAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([status])
+  @@map("whatsapp_logs")
+}
+
+model EmailLog {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  email String
+
+  subject String
+
+  body String
+
+  status NotificationStatus @default(PENDING)
+
+  provider String?
+
+  externalId String?
+
+  sentAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("email_logs")
+}
+
+model AdminLog {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  action String
+
+  targetType String?
+
+  targetId String?
+
+  description String?
+
+  ipAddress String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("admin_logs")
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  entity String
+
+  entityId String
+
+  action String
+
+  oldData Json?
+
+  newData Json?
+
+  ipAddress String?
+
+  createdAt DateTime @default(now())
+
+  @@index([entity])
+  @@index([entityId])
+  @@map("audit_logs")
+}
+
+model SupportTicket {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  subject String
+
+  message String
+
+  status String @default("OPEN")
+
+  priority String @default("NORMAL")
+
+  adminReply String?
+
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("support_tickets")
+}
+
+model Referral {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  referralCode String @unique
+
+  referredEmail String?
+
+  rewardAmount Float @default(0)
+
+  isPaid Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("referrals")
+}
+
+model Coupon {
+  id String @id @default(cuid())
+
+  code String @unique
+
+  description String?
+
+  discountPercent Float?
+
+  discountAmount Float?
+
+  maxUses Int?
+
+  usedCount Int @default(0)
+
+  expiresAt DateTime?
+
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@index([code])
+  @@map("coupons")
+}
+
+model DashboardStat {
+  id String @id @default(cuid())
+
+  date DateTime
+
+  newUsers Int @default(0)
+
+  activeUsers Int @default(0)
+
+  resumesUploaded Int @default(0)
+
+  applicationsSent Int @default(0)
+
+  interviews Int @default(0)
+
+  hires Int @default(0)
+
+  revenue Float @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@unique([date])
+  @@map("dashboard_stats")
+}
+
+model SystemSetting {
+  id String @id @default(cuid())
+
+  key String @unique
+
+  value String
+
+  description String?
+
+  updatedAt DateTime @updatedAt
+
+  createdAt DateTime @default(now())
+
+  @@map("system_settings")
+}

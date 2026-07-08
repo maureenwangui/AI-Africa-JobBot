@@ -1,96 +1,186 @@
-const express = require('express');
-const getDb = require('../db/connection');
-const { auth } = require('../middleware/auth');
-const notificationService = require('../services/notificationService');
+const express = require("express");
+const { PrismaClient } = require("@prisma/client");
+const { auth } = require("../middleware/auth");
+const notificationService = require("../services/notificationService");
 
+const prisma = new PrismaClient();
 const router = express.Router();
 
 // GET all applications
-router.get('/', auth, (req, res) => {
-  const db = getDb();
+router.get("/", auth, async (req, res) => {
+  try {
+    const apps = await prisma.application.findMany({
+      where: {
+        userId: req.user.id,
+      },
+      include: {
+        job: {
+          select: {
+            title: true,
+            company: true,
+            location: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      take: 100,
+    });
 
-  const apps = db.prepare(`
-    SELECT a.*, j.title AS job_title, j.company, j.location
-    FROM applications a
-    JOIN jobs j ON a.job_id = j.id
-    WHERE a.user_id = ?
-    ORDER BY a.created_at DESC
-    LIMIT 100
-  `).all(req.user.id);
-
-  res.json(apps);
+    res.json(apps);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      error: "Failed to fetch applications",
+    });
+  }
 });
 
 // STATS
-router.get('/stats', auth, (req, res) => {
-  const db = getDb();
+router.get("/stats", auth, async (req, res) => {
+  try {
+    const total = await prisma.application.count({
+      where: { userId: req.user.id },
+    });
 
-  res.json({
-    total: db.prepare("SELECT COUNT(*) c FROM applications WHERE user_id=?").get(req.user.id).c,
-    sent: db.prepare("SELECT COUNT(*) c FROM applications WHERE user_id=? AND status='sent'").get(req.user.id).c,
-    viewed: db.prepare("SELECT COUNT(*) c FROM applications WHERE user_id=? AND status='viewed'").get(req.user.id).c,
-    interview: db.prepare("SELECT COUNT(*) c FROM applications WHERE user_id=? AND status='interview'").get(req.user.id).c,
-  });
+    const sent = await prisma.application.count({
+      where: {
+        userId: req.user.id,
+        status: "sent",
+      },
+    });
+
+    const viewed = await prisma.application.count({
+      where: {
+        userId: req.user.id,
+        status: "viewed",
+      },
+    });
+
+    const interview = await prisma.application.count({
+      where: {
+        userId: req.user.id,
+        status: "interview",
+      },
+    });
+
+    res.json({
+      total,
+      sent,
+      viewed,
+      interview,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      error: "Failed to fetch statistics",
+    });
+  }
 });
 
 // APPLY
-router.post('/', auth, async (req, res) => {
+router.post("/", auth, async (req, res) => {
   try {
     const { job_id, cover_letter } = req.body;
-    if (!job_id) return res.status(400).json({ error: 'job_id required' });
 
-    const db = getDb();
-
-    const existing = db.prepare(
-      'SELECT id FROM applications WHERE user_id=? AND job_id=?'
-    ).get(req.user.id, job_id);
-
-    if (existing) {
-      return res.status(409).json({ error: 'Already applied' });
+    if (!job_id) {
+      return res.status(400).json({
+        error: "job_id required",
+      });
     }
 
-    const result = db.prepare(`
-      INSERT INTO applications (user_id, job_id, status, cover_letter, applied_at)
-      VALUES (?, ?, 'sent', ?, datetime('now'))
-    `).run(req.user.id, job_id, cover_letter || '');
+    const existing = await prisma.application.findFirst({
+      where: {
+        userId: req.user.id,
+        jobId: Number(job_id),
+      },
+    });
 
-    const job = db.prepare(
-      'SELECT title, company FROM jobs WHERE id=?'
-    ).get(job_id);
+    if (existing) {
+      return res.status(409).json({
+        error: "Already applied",
+      });
+    }
 
-    if (notificationService?.sendApplicationAlert) {
-      notificationService.sendApplicationAlert(req.user, job).catch(console.error);
+    const application = await prisma.application.create({
+      data: {
+        userId: req.user.id,
+        jobId: Number(job_id),
+        status: "sent",
+        coverLetter: cover_letter || "",
+        appliedAt: new Date(),
+      },
+    });
+
+    const job = await prisma.job.findUnique({
+      where: {
+        id: Number(job_id),
+      },
+      select: {
+        title: true,
+        company: true,
+      },
+    });
+
+    if (notificationService?.sendApplicationAlert && job) {
+      await notificationService.sendApplicationAlert(req.user, job);
     }
 
     res.status(201).json({
-      id: result.lastInsertRowid,
-      message: 'Application submitted'
+      id: application.id,
+      message: "Application submitted",
     });
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Application failed' });
+    res.status(500).json({
+      error: "Application failed",
+    });
   }
 });
 
 // UPDATE STATUS
-router.patch('/:id/status', auth, (req, res) => {
-  const { status } = req.body;
+router.patch("/:id/status", auth, async (req, res) => {
+  try {
+    const { status } = req.body;
 
-  const valid = ['queued','sent','viewed','interview','rejected','hired'];
-  if (!valid.includes(status)) {
-    return res.status(400).json({ error: 'Invalid status' });
+    const valid = [
+      "queued",
+      "sent",
+      "viewed",
+      "interview",
+      "rejected",
+      "hired",
+    ];
+
+    if (!valid.includes(status)) {
+      return res.status(400).json({
+        error: "Invalid status",
+      });
+    }
+
+    await prisma.application.updateMany({
+      where: {
+        id: Number(req.params.id),
+        userId: req.user.id,
+      },
+      data: {
+        status,
+        updatedAt: new Date(),
+      },
+    });
+
+    res.json({
+      message: "Updated",
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      error: "Update failed",
+    });
   }
-
-  const db = getDb();
-
-  db.prepare(`
-    UPDATE applications
-    SET status=?, updated_at=datetime('now')
-    WHERE id=? AND user_id=?
-  `).run(status, req.params.id, req.user.id);
-
-  res.json({ message: 'Updated' });
 });
 
 module.exports = router;

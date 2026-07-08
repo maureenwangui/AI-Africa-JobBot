@@ -1,19 +1,25 @@
 // services/notificationService.js
 
-const getDb = require('../db/connection');
+const { PrismaClient } = require('@prisma/client');
 const axios = require('axios');
 const emailService = require('./emailService');
+
+const prisma = new PrismaClient();
 
 /* =========================
    DB LAYER
 ========================= */
-function saveNotification({ userId, type, channel, title, message }) {
-  const db = getDb();
-
-  db.prepare(`
-    INSERT INTO notifications (user_id, type, channel, title, message, created_at)
-    VALUES (?, ?, ?, ?, ?, datetime('now'))
-  `).run(userId, type, channel, title, message);
+async function saveNotification({ userId, type, channel, title, message }) {
+  await prisma.notification.create({
+    data: {
+      user_id:    userId,
+      type,
+      channel,
+      title,
+      message,
+      created_at: new Date(),
+    },
+  });
 }
 
 /* =========================
@@ -27,12 +33,12 @@ async function sendWhatsApp(phone, message) {
       'https://api.africastalking.com/version1/messaging/whatsapp',
       {
         username: process.env.AT_USERNAME,
-        to: phone,
+        to:       phone,
         message,
       },
       {
         headers: {
-          apikey: process.env.AT_API_KEY,
+          apikey:          process.env.AT_API_KEY,
           'Content-Type': 'application/json',
         },
       }
@@ -47,10 +53,7 @@ async function sendWhatsApp(phone, message) {
 ========================= */
 async function sendEmail(user, subject, message) {
   try {
-    await emailService.sendApplicationAlert(user, {
-      subject,
-      message,
-    });
+    await emailService.sendApplicationAlert(user, { subject, message });
   } catch (err) {
     console.error('Email failed:', err.message);
   }
@@ -73,13 +76,13 @@ async function safeRun(fn, retries = 2) {
    MAIN ALERTS
 ========================= */
 async function sendApplicationAlert(user, job) {
-  const title = `Applied: ${job.title}`;
+  const title   = `Applied: ${job.title}`;
   const message = `We applied to ${job.title} at ${job.company}`;
 
-  // DB log
-  saveNotification({
-    userId: user.id,
-    type: 'application',
+  // DB log — now awaited since saveNotification is async
+  await saveNotification({
+    userId:  user.id,
+    type:    'application',
     channel: 'system',
     title,
     message,
@@ -97,21 +100,20 @@ async function sendApplicationAlert(user, job) {
 }
 
 async function sendMatchAlert(user, count) {
-  const title = 'New Job Matches';
+  const title   = 'New Job Matches';
   const message = `You have ${count} new job matches`;
 
-  saveNotification({
-    userId: user.id,
-    type: 'match',
+  // DB log — now awaited since saveNotification is async
+  await saveNotification({
+    userId:  user.id,
+    type:    'match',
     channel: 'system',
     title,
     message,
   });
 
   if (user.phone) {
-    await safeRun(() =>
-      sendWhatsApp(user.phone, `🎯 ${message}`)
-    );
+    await safeRun(() => sendWhatsApp(user.phone, `🎯 ${message}`));
   }
 }
 

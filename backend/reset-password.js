@@ -1,16 +1,24 @@
 const bcrypt = require('bcryptjs');
-const getDb = require('./db/connection');
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient();
 
 (async () => {
-  const db = getDb();
+  try {
+    const newPassword = 'Admin123!';
+    const hash = await bcrypt.hash(newPassword, 12);
 
-  const newPassword = 'Admin123!';
-  const hash = await bcrypt.hash(newPassword, 12);
+    const result = await prisma.user.updateMany({
+      where: { email: 'maureenwangui@ymail.com' },
+      data:  { password: hash },
+    });
 
-  const result = db.prepare(
-    "UPDATE users SET password = ? WHERE email = ?"
-  ).run(hash, 'maureenwangui@ymail.com');
-
-  console.log('Rows updated:', result.changes);
-  console.log('New password:', newPassword);
+    console.log('Rows updated:', result.count);
+    console.log('New password:', newPassword);
+  } catch (err) {
+    console.error('❌ Failed:', err.message);
+    process.exit(1);
+  } finally {
+    await prisma.$disconnect();
+  }
 })();

@@ -1,10 +1,11 @@
 // routes/subscription.js — M-Pesa + Paystack Payment Integration
 const express = require('express');
 const axios   = require('axios');
-const getDb   = require('../db/connection');
+const { PrismaClient } = require('@prisma/client');
 const { auth } = require('../middleware/auth');
 
 const router = express.Router();
+const prisma = new PrismaClient();
 
 // ─── Plan Config ──────────────────────────────────────────────────────────────
 const PLANS = {
@@ -29,17 +30,16 @@ function getPlanAmount(plan, billing_cycle, currency = 'KES') {
 }
 
 // ── GET /api/subscription/test-config ────────────────────────────────────────
-// Use this to check if your payment keys are configured correctly
 router.get('/test-config', (req, res) => {
   res.json({
     mpesa: {
       configured: !!(process.env.MPESA_CONSUMER_KEY && process.env.MPESA_CONSUMER_SECRET),
-      env: process.env.MPESA_ENV || 'sandbox',
-      shortcode: process.env.MPESA_SHORTCODE || 'not set',
+      env:        process.env.MPESA_ENV || 'sandbox',
+      shortcode:  process.env.MPESA_SHORTCODE || 'not set',
     },
     paystack: {
-      configured: !!process.env.PAYSTACK_SECRET_KEY,
-      key_prefix: process.env.PAYSTACK_SECRET_KEY
+      configured:  !!process.env.PAYSTACK_SECRET_KEY,
+      key_prefix:  process.env.PAYSTACK_SECRET_KEY
         ? process.env.PAYSTACK_SECRET_KEY.slice(0, 12) + '...'
         : 'not set',
       mode: process.env.PAYSTACK_SECRET_KEY?.startsWith('sk_live') ? 'LIVE' : 'TEST',
@@ -62,12 +62,26 @@ router.get('/plans', (req, res) => {
 });
 
 // ── GET /api/subscription/status ──────────────────────────────────────────────
-router.get('/status', auth, (req, res) => {
-  const db    = getDb();
-  const sub   = db.prepare("SELECT * FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(req.user.id);
-  const month = new Date().toISOString().slice(0, 7);
-  const usage = db.prepare("SELECT * FROM usage_limits WHERE user_id = ? AND month = ?").get(req.user.id, month);
-  res.json({ subscription: sub || null, usage: usage || null, plan: req.user.plan });
+router.get('/status', auth, async (req, res) => {
+  try {
+    const month = new Date().toISOString().slice(0, 7);
+
+    // Run both lookups in parallel
+    const [sub, usage] = await Promise.all([
+      prisma.subscription.findFirst({
+        where:   { user_id: req.user.id },
+        orderBy: { created_at: 'desc' },
+      }),
+      prisma.usageLimit.findFirst({
+        where: { user_id: req.user.id, month },
+      }),
+    ]);
+
+    res.json({ subscription: sub || null, usage: usage || null, plan: req.user.plan });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch subscription status' });
+  }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -91,14 +105,13 @@ router.post('/mpesa/initiate', auth, async (req, res) => {
   try {
     const { plan, billing_cycle = 'monthly', phone } = req.body;
 
-    if (!PLANS[plan])                  return res.status(400).json({ error: 'Invalid plan. Choose: starter, growth, or pro' });
+    if (!PLANS[plan])                       return res.status(400).json({ error: 'Invalid plan. Choose: starter, growth, or pro' });
     if (!BILLING_MULTIPLIER[billing_cycle]) return res.status(400).json({ error: 'Invalid billing cycle' });
-    if (!phone)                        return res.status(400).json({ error: 'Phone number required for M-Pesa' });
+    if (!phone)                             return res.status(400).json({ error: 'Phone number required for M-Pesa' });
 
     const amount = getPlanAmount(plan, billing_cycle, 'KES');
     if (!amount) return res.status(400).json({ error: 'Could not calculate amount' });
 
-    // Format phone: 0712345678 or +254712345678 → 254712345678
     const formattedPhone = phone.replace(/^0/, '254').replace(/^\+/, '').replace(/\s/g, '');
 
     const token       = await getMpesaToken();
@@ -130,16 +143,22 @@ router.post('/mpesa/initiate', auth, async (req, res) => {
       return res.status(400).json({ error: data.ResponseDescription || 'M-Pesa request failed' });
     }
 
-    // Save pending subscription
-    const db = getDb();
-    db.prepare(`
-      INSERT INTO subscriptions (user_id, plan, billing_cycle, provider, status, amount, currency, checkout_request_id)
-      VALUES (?, ?, ?, 'mpesa', 'pending', ?, 'KES', ?)
-    `).run(req.user.id, plan, billing_cycle, amount, data.CheckoutRequestID);
+    await prisma.subscription.create({
+      data: {
+        user_id:             req.user.id,
+        plan,
+        billing_cycle,
+        provider:            'mpesa',
+        status:              'pending',
+        amount,
+        currency:            'KES',
+        checkout_request_id: data.CheckoutRequestID,
+      },
+    });
 
     res.json({
-      message:              'STK Push sent to your phone. Enter your M-Pesa PIN to complete payment.',
-      checkout_request_id:  data.CheckoutRequestID,
+      message:             'STK Push sent to your phone. Enter your M-Pesa PIN to complete payment.',
+      checkout_request_id: data.CheckoutRequestID,
       amount,
       phone: formattedPhone,
     });
@@ -159,8 +178,11 @@ router.post('/mpesa/initiate', auth, async (req, res) => {
 router.post('/mpesa/check', auth, async (req, res) => {
   try {
     const { checkout_request_id } = req.body;
-    const db  = getDb();
-    const sub = db.prepare("SELECT * FROM subscriptions WHERE checkout_request_id = ? AND user_id = ?").get(checkout_request_id, req.user.id);
+
+    const sub = await prisma.subscription.findFirst({
+      where: { checkout_request_id, user_id: req.user.id },
+    });
+
     if (!sub) return res.status(404).json({ error: 'Payment not found' });
     res.json({ status: sub.status, plan: sub.plan });
   } catch (err) {
@@ -178,7 +200,7 @@ router.post('/paystack/initiate', auth, async (req, res) => {
   try {
     const { plan, billing_cycle = 'monthly', currency = 'KES' } = req.body;
 
-    if (!PLANS[plan]) return res.status(400).json({ error: 'Invalid plan. Choose: starter, growth, or pro' });
+    if (!PLANS[plan])                       return res.status(400).json({ error: 'Invalid plan. Choose: starter, growth, or pro' });
     if (!BILLING_MULTIPLIER[billing_cycle]) return res.status(400).json({ error: 'Invalid billing cycle' });
 
     const paystackKey = process.env.PAYSTACK_SECRET_KEY;
@@ -189,29 +211,28 @@ router.post('/paystack/initiate', auth, async (req, res) => {
       });
     }
 
-    const amount   = getPlanAmount(plan, billing_cycle, 'KES');
+    const amount = getPlanAmount(plan, billing_cycle, 'KES');
     if (!amount) return res.status(400).json({ error: 'Could not calculate amount' });
 
     const txRef    = `JOBBOT-${req.user.id}-${plan}-${Date.now()}`;
     const planInfo = PLANS[plan];
 
-    // Paystack requires amount in kobo/cents (multiply by 100)
     const { data } = await axios.post(
       'https://api.paystack.co/transaction/initialize',
       {
         email:        req.user.email,
         amount:       amount * 100,
-        currency:     currency,
+        currency,
         reference:    txRef,
         callback_url: `${process.env.FRONTEND_URL || 'http://localhost:5500'}/payment-success.html`,
         metadata: {
           user_id:       req.user.id,
-          plan:          plan,
-          billing_cycle: billing_cycle,
+          plan,
+          billing_cycle,
           name:          req.user.name || req.user.email,
           custom_fields: [
-            { display_name: 'Plan',         variable_name: 'plan',         value: planInfo.name  },
-            { display_name: 'Billing Cycle', variable_name: 'billing_cycle', value: billing_cycle },
+            { display_name: 'Plan',          variable_name: 'plan',          value: planInfo.name  },
+            { display_name: 'Billing Cycle', variable_name: 'billing_cycle', value: billing_cycle  },
           ],
         },
       },
@@ -227,31 +248,35 @@ router.post('/paystack/initiate', auth, async (req, res) => {
       return res.status(400).json({ error: data.message || 'Paystack request failed' });
     }
 
-    // Save pending subscription
-    const db = getDb();
-    db.prepare(`
-      INSERT INTO subscriptions (user_id, plan, billing_cycle, provider, status, amount, currency, tx_ref)
-      VALUES (?, ?, ?, 'paystack', 'pending', ?, ?, ?)
-    `).run(req.user.id, plan, billing_cycle, amount, currency, txRef);
+    await prisma.subscription.create({
+      data: {
+        user_id:      req.user.id,
+        plan,
+        billing_cycle,
+        provider:     'paystack',
+        status:       'pending',
+        amount,
+        currency,
+        tx_ref:       txRef,
+      },
+    });
 
     res.json({
-      payment_url:  data.data.authorization_url,
-      access_code:  data.data.access_code,
-      reference:    txRef,
+      payment_url: data.data.authorization_url,
+      access_code: data.data.access_code,
+      reference:   txRef,
       amount,
       currency,
     });
   } catch (err) {
-    // Log the full error so we can see exactly what went wrong
     const errDetail = err.response?.data || err.message || err;
     console.error('Paystack initiate error FULL:', JSON.stringify(errDetail, null, 2));
-    console.error('Paystack status:', err.response?.status);
+    console.error('Paystack status:',  err.response?.status);
     console.error('Paystack headers:', err.response?.headers);
-    
-    // Return specific error message to frontend
+
     const userMsg = err.response?.data?.message || err.message || 'Payment initiation failed';
-    res.status(500).json({ 
-      error: userMsg,
+    res.status(500).json({
+      error:  userMsg,
       detail: process.env.NODE_ENV !== 'production' ? errDetail : undefined,
     });
   }
@@ -263,7 +288,6 @@ router.post('/paystack/verify', auth, async (req, res) => {
     const { tx_ref, reference } = req.body;
     const paystackKey = process.env.PAYSTACK_SECRET_KEY;
 
-    // Paystack verifies by reference, not transaction_id
     const ref = reference || tx_ref;
     if (!ref) return res.status(400).json({ error: 'reference is required' });
 
@@ -273,13 +297,13 @@ router.post('/paystack/verify', auth, async (req, res) => {
     );
 
     const tx = data.data;
-    // Paystack success status is 'success' (not 'successful' like Flutterwave)
     if (!data.status || tx.status !== 'success') {
       return res.status(400).json({ error: 'Payment not successful', status: tx?.status });
     }
 
-    const db  = getDb();
-    const sub = db.prepare("SELECT * FROM subscriptions WHERE tx_ref = ? AND user_id = ?").get(ref, req.user.id);
+    const sub = await prisma.subscription.findFirst({
+      where: { tx_ref: ref, user_id: req.user.id },
+    });
     if (!sub) return res.status(404).json({ error: 'Subscription record not found' });
 
     // Prevent double activation
@@ -291,16 +315,27 @@ router.post('/paystack/verify', auth, async (req, res) => {
     const endDate = new Date();
     endDate.setMonth(endDate.getMonth() + months);
 
-    db.prepare(`
-      UPDATE subscriptions
-      SET status = 'active', start_date = datetime('now'), end_date = ?,
-          flw_transaction_id = ?, updated_at = datetime('now')
-      WHERE id = ?
-    `).run(endDate.toISOString(), String(tx.id), sub.id);
-
-    db.prepare(`
-      UPDATE users SET plan = ?, subscription_status = 'active', updated_at = datetime('now') WHERE id = ?
-    `).run(sub.plan, req.user.id);
+    // Atomic: update both tables together or neither
+    await prisma.$transaction([
+      prisma.subscription.update({
+        where: { id: sub.id },
+        data: {
+          status:             'active',
+          start_date:         new Date(),
+          end_date:           endDate,
+          flw_transaction_id: String(tx.id),
+          updated_at:         new Date(),
+        },
+      }),
+      prisma.user.update({
+        where: { id: req.user.id },
+        data: {
+          plan:                sub.plan,
+          subscription_status: 'active',
+          updated_at:          new Date(),
+        },
+      }),
+    ]);
 
     res.json({
       status:  'active',
@@ -315,12 +350,30 @@ router.post('/paystack/verify', auth, async (req, res) => {
 
 // POST /api/subscription/cancel
 router.post('/cancel', auth, async (req, res) => {
-  const db  = getDb();
-  const sub = db.prepare("SELECT * FROM subscriptions WHERE user_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1").get(req.user.id);
-  if (!sub) return res.status(404).json({ error: 'No active subscription found' });
-  db.prepare("UPDATE subscriptions SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?").run(sub.id);
-  db.prepare("UPDATE users SET subscription_status = 'cancelled', updated_at = datetime('now') WHERE id = ?").run(req.user.id);
-  res.json({ message: 'Subscription cancelled. Access continues until period end.' });
+  try {
+    const sub = await prisma.subscription.findFirst({
+      where:   { user_id: req.user.id, status: 'active' },
+      orderBy: { created_at: 'desc' },
+    });
+    if (!sub) return res.status(404).json({ error: 'No active subscription found' });
+
+    // Atomic: cancel subscription + update user in one transaction
+    await prisma.$transaction([
+      prisma.subscription.update({
+        where: { id: sub.id },
+        data:  { status: 'cancelled', updated_at: new Date() },
+      }),
+      prisma.user.update({
+        where: { id: req.user.id },
+        data:  { subscription_status: 'cancelled', updated_at: new Date() },
+      }),
+    ]);
+
+    res.json({ message: 'Subscription cancelled. Access continues until period end.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Cancellation failed' });
+  }
 });
 
 module.exports = router;

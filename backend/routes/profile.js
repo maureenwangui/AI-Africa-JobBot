@@ -3,11 +3,14 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const getDb = require('../db/connection');
+const { PrismaClient } = require('@prisma/client');
 const { auth } = require('../middleware/auth');
 const aiService = require('../services/aiService');
 
 const router = express.Router();
+
+// Use a shared Prisma singleton — move to lib/prisma.js if needed
+const prisma = new PrismaClient();
 
 // Multer config for CV uploads
 const storage = multer.diskStorage({
@@ -35,38 +38,59 @@ const upload = multer({
 });
 
 // GET /api/profile
-router.get('/', auth, (req, res) => {
-  const db = getDb();
-  const profile = db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(req.user.id);
-  if (!profile) return res.status(404).json({ error: 'Profile not found' });
+router.get('/', auth, async (req, res) => {
+  try {
+    const profile = await prisma.profile.findUnique({
+      where: { user_id: req.user.id },
+    });
 
-  // Parse JSON fields
-  ['skills', 'experience', 'education', 'keywords', 'preferred_roles'].forEach(f => {
-    try { if (profile[f]) profile[f] = JSON.parse(profile[f]); } catch {}
-  });
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-  res.json(profile);
+    // Prisma + PostgreSQL Json fields are returned as native JS objects/arrays —
+    // no manual JSON.parse needed (unlike better-sqlite3 which stores raw strings).
+    res.json(profile);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to fetch profile' });
+  }
 });
 
 // PUT /api/profile — update profile fields
-router.put('/', auth, (req, res) => {
-  const db = getDb();
-  const { skills, experience, education, keywords, preferred_roles, preferred_location, remote_preference, summary } = req.body;
+router.put('/', auth, async (req, res) => {
+  try {
+    const {
+      skills,
+      experience,
+      education,
+      keywords,
+      preferred_roles,
+      preferred_location,
+      remote_preference,
+      summary,
+    } = req.body;
 
-  db.prepare(`
-    UPDATE profiles SET
-      skills = ?, experience = ?, education = ?, keywords = ?,
-      preferred_roles = ?, preferred_location = ?, remote_preference = ?,
-      summary = ?, updated_at = datetime('now')
-    WHERE user_id = ?
-  `).run(
-    JSON.stringify(skills), JSON.stringify(experience),
-    JSON.stringify(education), JSON.stringify(keywords),
-    JSON.stringify(preferred_roles), preferred_location,
-    remote_preference ? 1 : 0, summary, req.user.id
-  );
+    await prisma.profile.update({
+      where: { user_id: req.user.id },
+      data: {
+        skills:             skills             ?? [],
+        experience:         experience         ?? [],
+        education:          education          ?? [],
+        keywords:           keywords           ?? [],
+        preferred_roles:    preferred_roles    ?? [],
+        preferred_location: preferred_location ?? null,
+        // PostgreSQL uses a native Boolean — no more 0/1 coercion
+        remote_preference:  Boolean(remote_preference),
+        summary:            summary            ?? null,
+        // Omit this line if your schema has @updatedAt — Prisma sets it automatically
+        updated_at:         new Date(),
+      },
+    });
 
-  res.json({ message: 'Profile updated' });
+    res.json({ message: 'Profile updated' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to update profile' });
+  }
 });
 
 // POST /api/profile/upload-cv
@@ -74,7 +98,6 @@ router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    const db = getDb();
     const filename = req.file.filename;
 
     // Use AI to extract CV data
@@ -85,25 +108,19 @@ router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
       console.error('AI extraction failed, using filename:', e.message);
     }
 
-    db.prepare(`
-      UPDATE profiles SET
-        cv_filename = ?,
-        skills = ?,
-        experience = ?,
-        education = ?,
-        keywords = ?,
-        summary = ?,
-        updated_at = datetime('now')
-      WHERE user_id = ?
-    `).run(
-      filename,
-      JSON.stringify(extracted.skills || []),
-      JSON.stringify(extracted.experience || []),
-      JSON.stringify(extracted.education || []),
-      JSON.stringify(extracted.keywords || []),
-      extracted.summary || '',
-      req.user.id
-    );
+    await prisma.profile.update({
+      where: { user_id: req.user.id },
+      data: {
+        cv_filename: filename,
+        // Pass arrays/objects directly — Prisma serialises to JSONB automatically
+        skills:      extracted.skills      || [],
+        experience:  extracted.experience  || [],
+        education:   extracted.education   || [],
+        keywords:    extracted.keywords    || [],
+        summary:     extracted.summary     || '',
+        updated_at:  new Date(),
+      },
+    });
 
     res.json({
       message: 'CV uploaded and parsed successfully',
