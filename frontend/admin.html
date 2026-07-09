@@ -448,7 +448,7 @@ async function doAdminLogin() {
 
     const me     = await meRes.json();
 
-    if (me.role !== 'admin') {
+    if (me.role !== 'ADMIN') {
       TOK = null;
       throw new Error('Access denied. Your account (' + email + ') does not have admin role.\n\nRun in CMD:\nnode make-admin.js ' + email);
     }
@@ -492,7 +492,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
       const u = await r.json();
       
-      if (r.ok && u.role === 'admin') {
+      if (r.ok && u.role === 'ADMIN') {
         document.getElementById('tbar-user').textContent = '👤 ' + (u.name || u.email);
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('admin-app').style.display = 'block';

@@ -69,85 +69,69 @@ res.status(201).json({
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
-    const user = await prisma.user.findUnique({
-  where: {
-    email: email.toLowerCase(),
-  },
-});
+    if (!email || !password) {
+      return res.status(400).json({
+        error: 'Email and password required'
+      });
+    }
 
-if (!user) {
-  return res.status(401).json({
-    error: "Invalid email or password",
-  });
-}
-
-const valid = await bcrypt.compare(password, user.password);
-
-if (!valid) {
-  return res.status(401).json({
-    error: "Invalid email or password",
-  });
-}
-
-const token = jwt.sign(
-  { id: user.id },
-  process.env.JWT_SECRET,
-  {
-    expiresIn: process.env.JWT_EXPIRES_IN || "7d",
-  }
-);
-
-res.json({
-  token,
-  user: {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    phone: user.phone,
-    role: user.role,
-    plan: user.plan,
-    subscriptionStatus: user.subscriptionStatus,
-  },
-});
-  } catch (err) {
-    res.status(500).json({ error: 'Login failed' });
-  }
-});
-
-// POST /api/auth/forgot-password
-router.post('/forgot-password', async (req, res) => {
-  try {
-    const { email } = req.body;
     const user = await prisma.user.findUnique({
       where: {
-        email: email?.toLowerCase(),
+        email: email.toLowerCase().trim()
+      }
+    });
+
+    if (!user) {
+      return res.status(401).json({
+        error: 'Invalid email or password'
+      });
+    }
+
+    const valid = await bcrypt.compare(password, user.password);
+
+    if (!valid) {
+      return res.status(401).json({
+        error: 'Invalid email or password'
+      });
+    }
+
+    const token = jwt.sign(
+      {
+        id: user.id,
+        role: user.role
       },
-  });
-
-    // Always return success to prevent email enumeration
-    if (!user) return res.json({ message: 'If that email exists, a reset link has been sent.' });
-
-    const resetToken = uuidv4();
-    const expires = new Date(Date.now() + 3600000).toISOString(); // 1 hour
+      process.env.JWT_SECRET,
+      {
+        expiresIn: process.env.JWT_EXPIRES_IN || '7d'
+      }
+    );
 
     await prisma.user.update({
       where: {
-        id: user.id,
+        id: user.id
       },
       data: {
-        resetToken,
-        resetTokenExpiry: new Date(Date.now() + 3600000),
-     },
+        lastLogin: new Date()
+      }
     });
 
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
-    emailService.sendPasswordReset(user.email, user.name, resetUrl).catch(console.error);
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        plan: user.plan
+      }
+    });
 
-    res.json({ message: 'If that email exists, a reset link has been sent.' });
   } catch (err) {
-    res.status(500).json({ error: 'Request failed' });
+    console.error('Login error:', err);
+    res.status(500).json({
+      error: 'Login failed'
+    });
   }
 });
 

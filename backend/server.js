@@ -11,6 +11,8 @@ const path = require('path');
 require('./db/init');
 
 const app = express();
+app.set('trust proxy', 1);
+
 const PORT = process.env.PORT || 5000;
 
 // ─── Security ────────────────────────────────────────────────────────────────
@@ -23,6 +25,7 @@ app.use(
 
 app.use(cors({
   origin: function(origin, callback) {
+    console.log("Incoming Origin:", origin);
     // Allow requests with no origin (mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
 
