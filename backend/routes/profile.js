@@ -197,6 +197,18 @@ router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
       },
     });
 
+    await prisma.resume.create({
+      data: {
+        userId:           String(req.user.id),
+        originalName:     req.file.originalname,
+        fileUrl:          `/uploads/cvs/${filename}`,
+        fileType:         path.extname(req.file.originalname).slice(1).toLowerCase(),
+        fileSize:         req.file.size,
+        parsedSuccessfully: extractedSkills.length > 0,
+        uploadSource:     'profile',
+      },
+    });
+
     res.json({
       message:  'CV uploaded successfully',
       filename,

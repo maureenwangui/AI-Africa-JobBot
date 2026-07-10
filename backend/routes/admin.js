@@ -80,6 +80,10 @@ router.get('/users', adminAuth, async (req, res) => {
     const users = await prisma.user.findMany({
       include: {
         profile:      true,
+        resumes: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
         applications: { select: { id: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -96,7 +100,7 @@ router.get('/users', adminAuth, async (req, res) => {
       // Fixed: format Date object → ISO string so frontend renders correctly
       created_at:          fmt(u.createdAt),
       app_count:           u.applications.length,
-      cv_filename:         u.profile?.cvFilename   || null,
+      cv_filename:         u.resumes?.[0]?.originalName || null,
       skills:              u.profile?.skills        || null,
       preferred_location:  u.profile?.preferredLocations || null,
     }));
