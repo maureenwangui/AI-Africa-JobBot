@@ -155,55 +155,54 @@ router.put('/', auth, async (req, res) => {
 //   db.prepare('UPDATE profiles SET cv_filename = ?, skills = ?, ... WHERE user_id = ?').run(...)
 // With:
 //   prisma.profile.upsert({ where: { userId }, update: { cvFilename, skills, ... }, create: { ... } })
+// POST /api/profile/upload-cv
 router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const filename = req.file.filename;
 
-    // AI extraction (unchanged — same service call)
-    let extracted = {};
+    // Read the uploaded file text
+    let extractedText = '';
     try {
-      extracted = await aiService.extractCvData(req.file.path);
+      extractedText = fs.readFileSync(req.file.path, 'utf8');
     } catch (e) {
-      console.error('AI extraction failed:', e.message);
+      extractedText = '';
     }
 
-    // Replaced: db.prepare('UPDATE profiles SET cv_filename = ?, skills = ?, ... WHERE user_id = ?').run(...)
-    await prisma.$transaction([
-      prisma.profile.upsert({
-        where: { userId: String(req.user.id) },
-        update: {
-          skills: JSON.stringify(extracted.skills || []),
-          experience: JSON.stringify(extracted.experience || []),
-          education: JSON.stringify(extracted.education || []),
-          summary: extracted.summary || '',
-        },
-        create: {
-          userId: String(req.user.id),
-          skills: JSON.stringify(extracted.skills || []),
-          experience: JSON.stringify(extracted.experience || []),
-          education: JSON.stringify(extracted.education || []),
-          summary: extracted.summary || '',
-        },
-      }),
-      prisma.resume.create({
-        data: {
-          userId: String(req.user.id),
-          originalName: req.file.originalname,
-          fileUrl: `/uploads/cvs/${filename}`,
-          fileType: path.extname(req.file.originalname).slice(1).toLowerCase(),
-          fileSize: req.file.size,
-          parsedSuccessfully: Boolean(extracted.summary || extracted.skills?.length),
-          uploadSource: 'profile',
-        },
-      }),
-    ]);
+    // Extract skills by keyword matching
+    const text = extractedText.toLowerCase();
+    const skillList = [
+      'project management',
+      'monitoring and evaluation',
+      'budgeting',
+      'report writing',
+      'microsoft excel',
+      'microsoft word',
+      'communication',
+      'leadership',
+      'data analysis',
+    ];
+    const extractedSkills = skillList.filter(skill => text.includes(skill));
+
+    // Save to database
+    await prisma.profile.upsert({
+      where:  { userId: req.user.id },
+      update: {
+        cvFilename: req.file.filename,
+        skills:     extractedSkills.join(', '),
+      },
+      create: {
+        userId:     req.user.id,
+        cvFilename: req.file.filename,
+        skills:     extractedSkills.join(', '),
+      },
+    });
 
     res.json({
-      message:   'CV uploaded and parsed successfully',
+      message:  'CV uploaded successfully',
       filename,
-      extracted,
+      skills:   extractedSkills,
     });
 
   } catch (err) {
