@@ -49,9 +49,13 @@ const upload = multer({
 // With:     prisma.profile.findUnique({ where: { userId } })
 router.get('/', auth, async (req, res) => {
   try {
-    const profile = await prisma.profile.findUnique({
-      where: { userId: String(req.user.id) },
-    });
+    const [profile, latestResume] = await Promise.all([
+      prisma.profile.findUnique({ where: { userId: String(req.user.id) } }),
+      prisma.resume.findFirst({
+        where: { userId: String(req.user.id) },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
 
     if (!profile) {
       return res.status(404).json({ error: 'Profile not found' });
@@ -68,11 +72,11 @@ router.get('/', auth, async (req, res) => {
     res.json({
       id:                 profile.id,
       user_id:            profile.userId,
-      cv_filename:        profile.cvFilename,
+      cv_filename:        latestResume?.originalName || null,
       skills:             parseField(profile.skills),
       experience:         parseField(profile.experience),
       education:          parseField(profile.education),
-      keywords:           parseField(profile.keywords),
+      keywords:           [],
       preferred_roles:    parseField(profile.preferredRoles),
       preferred_location: profile.preferredLocations,
       remote_preference:  profile.remotePreference ? 1 : 0,
@@ -103,7 +107,6 @@ router.put('/', auth, async (req, res) => {
       skills,
       experience,
       education,
-      keywords,
       preferred_roles,
       preferred_location,
       remote_preference,
@@ -119,7 +122,6 @@ router.put('/', auth, async (req, res) => {
       skills:             skills          ? JSON.stringify(skills)          : undefined,
       experience:         experience      ? JSON.stringify(experience)      : undefined,
       education:          education       ? JSON.stringify(education)       : undefined,
-      keywords:           keywords        ? JSON.stringify(keywords)        : undefined,
       preferredRoles:     preferred_roles ? JSON.stringify(preferred_roles) : undefined,
       preferredLocations: preferred_location ?? undefined,
       remotePreference:   remote_preference !== undefined ? !!remote_preference : undefined,
@@ -168,26 +170,35 @@ router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
     }
 
     // Replaced: db.prepare('UPDATE profiles SET cv_filename = ?, skills = ?, ... WHERE user_id = ?').run(...)
-    await prisma.profile.upsert({
-      where:  { userId: String(req.user.id) },
-      update: {
-        cvFilename:  filename,
-        skills:      JSON.stringify(extracted.skills      || []),
-        experience:  JSON.stringify(extracted.experience  || []),
-        education:   JSON.stringify(extracted.education   || []),
-        keywords:    JSON.stringify(extracted.keywords    || []),
-        summary:     extracted.summary || '',
-      },
-      create: {
-        userId:      String(req.user.id),
-        cvFilename:  filename,
-        skills:      JSON.stringify(extracted.skills      || []),
-        experience:  JSON.stringify(extracted.experience  || []),
-        education:   JSON.stringify(extracted.education   || []),
-        keywords:    JSON.stringify(extracted.keywords    || []),
-        summary:     extracted.summary || '',
-      },
-    });
+    await prisma.$transaction([
+      prisma.profile.upsert({
+        where: { userId: String(req.user.id) },
+        update: {
+          skills: JSON.stringify(extracted.skills || []),
+          experience: JSON.stringify(extracted.experience || []),
+          education: JSON.stringify(extracted.education || []),
+          summary: extracted.summary || '',
+        },
+        create: {
+          userId: String(req.user.id),
+          skills: JSON.stringify(extracted.skills || []),
+          experience: JSON.stringify(extracted.experience || []),
+          education: JSON.stringify(extracted.education || []),
+          summary: extracted.summary || '',
+        },
+      }),
+      prisma.resume.create({
+        data: {
+          userId: String(req.user.id),
+          originalName: req.file.originalname,
+          fileUrl: `/uploads/cvs/${filename}`,
+          fileType: path.extname(req.file.originalname).slice(1).toLowerCase(),
+          fileSize: req.file.size,
+          parsedSuccessfully: Boolean(extracted.summary || extracted.skills?.length),
+          uploadSource: 'profile',
+        },
+      }),
+    ]);
 
     res.json({
       message:   'CV uploaded and parsed successfully',

@@ -54,7 +54,13 @@ app.use(cors({
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10 });
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  handler: (req, res) => res.status(429).json({
+    error: 'Too many login attempts. Please wait 15 minutes and try again.',
+  }),
+});
 app.use('/api/', limiter);
 app.use('/api/auth/', authLimiter);
 
