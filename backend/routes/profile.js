@@ -22,9 +22,10 @@ const router = express.Router();
 // ── Multer config (unchanged — file upload logic stays the same) ──────────────
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '../uploads/cvs');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
+    const userFolder = path.join(__dirname, `../uploads/cvs/user_${req.user.id}`);
+    if (!fs.existsSync(userFolder))
+      fs.mkdirSync(userFolder, { recursive: true });
+    cb(null, userFolder);
   },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
@@ -201,7 +202,7 @@ router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
       data: {
         userId:           String(req.user.id),
         originalName:     req.file.originalname,
-        fileUrl:          `/uploads/cvs/${filename}`,
+        fileUrl:          `/uploads/cvs/user_${req.user.id}/${filename}`,
         fileType:         path.extname(req.file.originalname).slice(1).toLowerCase(),
         fileSize:         req.file.size,
         parsedSuccessfully: extractedSkills.length > 0,
