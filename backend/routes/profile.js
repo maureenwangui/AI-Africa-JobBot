@@ -189,13 +189,11 @@ router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
     await prisma.profile.upsert({
       where:  { userId: req.user.id },
       update: {
-        cvFilename: req.file.filename,
-        skills:     extractedSkills.join(', '),
+        skills: extractedSkills.join(', '),
       },
       create: {
-        userId:     req.user.id,
-        cvFilename: req.file.filename,
-        skills:     extractedSkills.join(', '),
+        userId: req.user.id,
+        skills: extractedSkills.join(', '),
       },
     });
 
