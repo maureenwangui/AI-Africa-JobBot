@@ -318,4 +318,36 @@ router.post('/jobs', adminAuth, async (req, res) => {
   }
 });
 
+// ── GET /api/admin/resumes ────────────────────────────────────────────────────
+router.get('/resumes', adminAuth, async (req, res) => {
+  try {
+    const resumes = await prisma.resume.findMany({
+      include: {
+        user: {
+          select: {
+            name: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    const formatted = resumes.map(r => ({
+      id:          r.id,
+      user_id:     r.userId,
+      name:        r.user?.name  || '',
+      email:       r.user?.email || '',
+      filename:    r.originalName,
+      file_url:    r.fileUrl,
+      file_type:   r.fileType,
+      file_size:   r.fileSize,
+      uploaded_at: r.createdAt,
+    }));
+    res.json(formatted);
+  } catch (err) {
+    console.error('Admin resumes error:', err.message);
+    res.status(500).json({ error: 'Failed to load resumes' });
+  }
+});
+
 module.exports = router;
