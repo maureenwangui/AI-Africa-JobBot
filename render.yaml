@@ -6,7 +6,7 @@ services:
     plan: free
     rootDir: backend
     buildCommand: npm install
-    startCommand: node db/init.js && node migrate.js && node server.js
+    startCommand: npx prisma migrate deploy && node server.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV

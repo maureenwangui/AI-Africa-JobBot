@@ -2,80 +2,107 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const { auth } = require('../middleware/auth');
-const { PLAN_LIMITS, getOrCreateUsage } = require('../middleware/subscription');
+const { PLAN_LIMITS } = require('../middleware/subscription');
 
-const router = express.Router();
 const prisma = new PrismaClient();
+const router = express.Router();
+
+// The database stores plans as Prisma enums while the existing frontend uses
+// the legacy lowercase plan names.
+const planLimitKey = {
+  FREE: 'free',
+  STARTER: 'starter',
+  PROFESSIONAL: 'growth',
+  BUSINESS: 'pro',
+};
 
 router.get('/', auth, async (req, res) => {
   try {
-    const uid = req.user.id;
+    const userId = req.user.id;
+    const month = new Date().toISOString().slice(0, 7);
 
-    // All independent queries run in parallel — matches the original's
-    // sequential synchronous reads but without the serial blocking
     const [
-      total_jobs,
-      total_applications,
+      totalJobs,
+      totalApplications,
       sent,
       interview,
-      rawRecentApplications,
-      recent_jobs,
+      recentApplications,
+      recentJobs,
       usage,
     ] = await Promise.all([
-      prisma.job.count({
-        where: { is_active: true },
-      }),
-      prisma.application.count({
-        where: { user_id: uid },
-      }),
-      prisma.application.count({
-        where: { user_id: uid, status: 'sent' },
-      }),
-      prisma.application.count({
-        where: { user_id: uid, status: 'interview' },
-      }),
+      prisma.job.count({ where: { status: 'ACTIVE' } }),
+      prisma.application.count({ where: { userId } }),
+      prisma.application.count({ where: { userId, status: 'APPLIED' } }),
+      prisma.application.count({ where: { userId, status: 'INTERVIEW' } }),
       prisma.application.findMany({
-        where: { user_id: uid },
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
         include: {
           job: {
-            select: { title: true, company: true, location: true },
+            select: {
+              title: true,
+              location: true,
+              company: { select: { name: true } },
+            },
           },
         },
-        orderBy: { created_at: 'desc' },
-        take: 5,
       }),
       prisma.job.findMany({
-        where: { is_active: true },
-        orderBy: { created_at: 'desc' },
+        where: { status: 'ACTIVE' },
+        orderBy: { createdAt: 'desc' },
         take: 5,
+        include: { company: { select: { name: true } } },
       }),
-      // NOTE: getOrCreateUsage must also be updated to accept a Prisma
-      // client instead of a better-sqlite3 db instance
-      getOrCreateUsage(prisma, uid),
+      prisma.usage.findUnique({ where: { userId_month: { userId, month } } }),
     ]);
 
-    // Flatten the Prisma nested relation to mirror the original
-    // SELECT a.*, j.title AS job_title, j.company, j.location JOIN shape
-    const recent_applications = rawRecentApplications.map(({ job, ...app }) => ({
-      ...app,
-      job_title: job.title,
-      company:   job.company,
-      location:  job.location,
-    }));
-
-    const limits = PLAN_LIMITS[req.user.plan] || PLAN_LIMITS.free;
+    const limitKey = planLimitKey[req.user.plan] || 'free';
+    const limits = PLAN_LIMITS[limitKey] || PLAN_LIMITS.free;
 
     res.json({
-      stats: { total_jobs, total_applications, sent, interview },
-      recent_applications,
-      recent_jobs,
-      usage: { ...usage, limits },
-      plan:                req.user.plan,
-      subscription_status: req.user.subscription_status,
+      stats: {
+        total_jobs: totalJobs,
+        total_applications: totalApplications,
+        sent,
+        interview,
+      },
+      recent_applications: recentApplications.map((application) => ({
+        id: application.id,
+        user_id: application.userId,
+        job_id: application.jobId,
+        status: application.status.toLowerCase(),
+        match_score: application.matchScore,
+        created_at: application.createdAt,
+        updated_at: application.updatedAt,
+        job_title: application.job.title,
+        company: application.job.company.name,
+        location: application.job.location || '',
+      })),
+      recent_jobs: recentJobs.map((job) => ({
+        id: job.id,
+        title: job.title,
+        company: job.company.name,
+        location: job.location || '',
+        remote: job.remoteType === 'REMOTE' ? 1 : 0,
+        salary: job.salaryMin && job.salaryMax
+          ? `${job.currency} ${job.salaryMin} - ${job.salaryMax}`
+          : null,
+        is_active: job.status === 'ACTIVE' ? 1 : 0,
+        created_at: job.createdAt,
+      })),
+      usage: {
+        applications_used: usage?.applicationsUsed || 0,
+        cv_used: usage?.resumesOptimized || 0,
+        cover_letters_used: usage?.coverLettersGenerated || 0,
+        limits,
+      },
+      plan: limitKey,
+      subscription_status: req.user.subscriptionStatus.toLowerCase(),
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || 'Failed to load dashboard' });
+    console.error('Dashboard error:', err.message);
+    res.status(500).json({ error: 'Failed to load dashboard' });
   }
 });
 

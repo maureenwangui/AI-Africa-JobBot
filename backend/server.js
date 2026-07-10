@@ -98,6 +98,14 @@ app.use((err, req, res, next) => {
 // ─── Start Cron Jobs ─────────────────────────────────────────────────────────
 require('./services/cronJobs');
 
+// Keep Render awake — ping every 10 minutes
+if (process.env.NODE_ENV === 'production') {
+  setInterval(() => {
+    const url = process.env.BACKEND_URL + '/health';
+    fetch(url).catch(() => {});
+  }, 10 * 60 * 1000);
+}
+
 app.listen(PORT, () => {
   console.log(`🚀 Africa JobBot API running on port ${PORT}`);
 });
