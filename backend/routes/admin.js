@@ -365,7 +365,7 @@ router.get('/resumes', adminAuth, async (req, res) => {
           name:       p.user?.name  || '—',
           email:      p.user?.email || '—',
           file_name:  p.cvFilename,
-          file_url:   `/uploads/cvs/user_${p.userId}/${p.cvFilename}`,
+          file_url:   `https://ai-africa-jobbot.onrender.com/uploads/cvs/user_${p.userId}/${p.cvFilename}`,
           created_at: p.updatedAt ? new Date(p.updatedAt).toISOString() : null,
         }));
     }
