@@ -214,6 +214,8 @@ select.fi option{background:#041B3D}
       <div class="sb-link" onclick="nav('addjob',this)"><span>➕</span> Add Job</div>
       <div class="sb-label">Revenue</div>
       <div class="sb-link" onclick="nav('subs',this)"><span>💳</span> Subscriptions</div>
+      <div class="sb-label">Files</div>
+      <div class="sb-link" onclick="nav('resumes',this)"><span>📄</span> Resumes / CVs</div>
     </aside>
 
     <!-- MAIN -->
@@ -351,6 +353,29 @@ select.fi option{background:#041B3D}
             <span>User</span><span>Plan</span><span>Billing</span><span>Provider</span><span>Status</span><span>Amount</span>
           </div>
           <div id="s-body"><div class="ld">Loading subscriptions...</div></div>
+        </div>
+      </div>
+
+      <!-- ── RESUMES ── -->
+      <div class="pg" id="pg-resumes">
+        <div class="pg-head">
+          <div class="pg-title">📄 Resumes / CVs <span class="cpill" id="r-count">0</span></div>
+          <button class="btn btn-o btn-r" onclick="loadResumes()">🔄 Refresh</button>
+        </div>
+        <div class="sr-row">
+          <input class="sr-in" id="r-search" placeholder="🔍 Search name, email or filename..." oninput="filterR()">
+          <select class="sr-sel" id="r-type" onchange="filterR()">
+            <option value="">All Types</option>
+            <option value="pdf">PDF</option>
+            <option value="docx">DOCX</option>
+            <option value="doc">DOC</option>
+          </select>
+        </div>
+        <div class="tbl-wrap">
+          <div class="tbl-head" style="grid-template-columns:2fr 2fr 2fr 0.8fr 1.2fr 1fr">
+            <span>User</span><span>Email</span><span>File Name</span><span>Type</span><span>Uploaded</span><span>Action</span>
+          </div>
+          <div id="r-body"><div class="ld">Loading resumes...</div></div>
         </div>
       </div>
 
@@ -513,6 +538,8 @@ function nav(id, el) {
   document.querySelectorAll('.sb-link').forEach(l=>l.classList.remove('on'));
   document.getElementById('pg-'+id).classList.add('on');
   if (el) el.classList.add('on');
+  // Auto-load resumes when tab is opened
+  if (id === 'resumes') loadResumes();
 }
 
 // ─── LOAD ALL ─────────────────────────────────────────────────────────────────
@@ -753,6 +780,95 @@ async function savePlan(){
   else toast('❌ '+(d.error||'Failed'),'error');
 }
 document.getElementById('plan-modal').addEventListener('click',function(e){if(e.target===this)closeModal();});
+
+// ─── RESUMES ──────────────────────────────────────────────────────────────────
+let allR = [];
+
+async function loadResumes() {
+  document.getElementById('r-body').innerHTML = '<div class="ld">Loading...</div>';
+  try {
+    const r = await req('/admin/resumes');
+    if (!r.ok) { toast('Failed to load resumes', 'error'); return; }
+    const ct = r.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) { toast('Invalid response from server', 'error'); return; }
+    allR = await r.json();
+    document.getElementById('r-count').textContent = allR.length;
+    renderR(allR);
+  } catch(e) {
+    toast('Error loading resumes: ' + e.message, 'error');
+    document.getElementById('r-body').innerHTML = '<div class="empty">Failed to load resumes</div>';
+  }
+}
+
+function getFileType(filename) {
+  if (!filename) return '—';
+  const ext = filename.split('.').pop().toLowerCase();
+  return ext;
+}
+
+function getFileIcon(filename) {
+  const ext = getFileType(filename);
+  if (ext === 'pdf')  return '📕';
+  if (ext === 'docx') return '📘';
+  if (ext === 'doc')  return '📗';
+  return '📄';
+}
+
+function renderR(resumes) {
+  const el = document.getElementById('r-body');
+  if (!resumes.length) {
+    el.innerHTML = '<div class="empty">No resumes uploaded yet</div>';
+    return;
+  }
+  el.innerHTML = resumes.map(r => {
+    const ext      = getFileType(r.file_name || r.originalName || r.cv_filename || '');
+    const icon     = getFileIcon(r.file_name || r.originalName || r.cv_filename || '');
+    const filename = r.file_name || r.originalName || r.cv_filename || '—';
+    const fileUrl  = r.file_url  || r.fileUrl  || (filename !== '—' ? '/uploads/cvs/' + filename : null);
+    const name     = r.name  || '—';
+    const email    = r.email || '—';
+    const uploaded = r.created_at || r.createdAt || r.uploaded_at;
+    const dateStr  = uploaded ? new Date(uploaded).toLocaleDateString() : '—';
+
+    return `
+    <div class="tbl-row" style="grid-template-columns:2fr 2fr 2fr 0.8fr 1.2fr 1fr">
+      <div class="cell">
+        <div class="cell-b">${name}</div>
+      </div>
+      <div class="cell cell-s">${email}</div>
+      <div class="cell">
+        <div style="display:flex;align-items:center;gap:0.4rem">
+          <span>${icon}</span>
+          <span class="cell-s" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px" title="${filename}">${filename}</span>
+        </div>
+      </div>
+      <div class="cell">
+        <span class="bdg" style="background:${ext==='pdf'?'rgba(239,83,80,0.15)':ext==='docx'?'rgba(66,165,245,0.15)':'rgba(0,230,118,0.12)'};color:${ext==='pdf'?'#EF5350':ext==='docx'?'#42A5F5':'#00E676'};text-transform:uppercase">${ext}</span>
+      </div>
+      <div class="cell cell-s">${dateStr}</div>
+      <div class="cell">
+        ${fileUrl
+          ? `<a href="${fileUrl}" target="_blank" download="${filename}" style="display:inline-flex;align-items:center;gap:0.3rem;background:rgba(66,165,245,0.15);color:var(--bright);border:1px solid rgba(66,165,245,0.25);padding:0.25rem 0.6rem;border-radius:6px;font-size:0.72rem;font-weight:600;text-decoration:none;cursor:pointer">⬇ Download</a>`
+          : `<span style="color:var(--muted);font-size:0.72rem">No file</span>`
+        }
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function filterR() {
+  const q  = document.getElementById('r-search').value.toLowerCase();
+  const tp = document.getElementById('r-type').value.toLowerCase();
+  renderR(allR.filter(r => {
+    const name     = (r.name  || '').toLowerCase();
+    const email    = (r.email || '').toLowerCase();
+    const filename = (r.file_name || r.originalName || r.cv_filename || '').toLowerCase();
+    const ext      = filename.split('.').pop();
+    const matchQ   = !q  || name.includes(q) || email.includes(q) || filename.includes(q);
+    const matchT   = !tp || ext === tp;
+    return matchQ && matchT;
+  }));
+}
 </script>
 </body>
 </html>

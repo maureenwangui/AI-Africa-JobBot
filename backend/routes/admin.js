@@ -318,32 +318,59 @@ router.post('/jobs', adminAuth, async (req, res) => {
   }
 });
 
+
 // ── GET /api/admin/resumes ────────────────────────────────────────────────────
 router.get('/resumes', adminAuth, async (req, res) => {
   try {
-    const resumes = await prisma.resume.findMany({
-      include: {
-        user: {
-          select: {
-            name: true,
-            email: true,
-          },
+    // Try Prisma resume model first (Prisma migration)
+    let resumes = [];
+    try {
+      const rows = await prisma.resume.findMany({
+        include: {
+          user: { select: { id: true, email: true, name: true } },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    const formatted = resumes.map(r => ({
-      id:          r.id,
-      user_id:     r.userId,
-      name:        r.user?.name  || '',
-      email:       r.user?.email || '',
-      filename:    r.originalName,
-      file_url:    r.fileUrl,
-      file_type:   r.fileType,
-      file_size:   r.fileSize,
-      uploaded_at: r.createdAt,
-    }));
-    res.json(formatted);
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      });
+
+      resumes = rows.map(r => ({
+        id:          r.id,
+        user_id:     r.userId,
+        name:        r.user?.name  || '—',
+        email:       r.user?.email || '—',
+        file_name:   r.originalName,
+        file_url:    r.fileUrl,
+        file_size:   r.fileSize,
+        mime_type:   r.mimeType,
+        created_at:  r.createdAt ? new Date(r.createdAt).toISOString() : null,
+      }));
+    } catch (prismaErr) {
+      // Fallback: read from profile cvFilename if resume model not available
+      console.warn('Resume model query failed, falling back to profiles:', prismaErr.message);
+
+      const profiles = await prisma.profile.findMany({
+        where:   { cvFilename: { not: null } },
+        include: {
+          user: { select: { id: true, email: true, name: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 500,
+      });
+
+      resumes = profiles
+        .filter(p => p.cvFilename)
+        .map(p => ({
+          id:         p.id,
+          user_id:    p.userId,
+          name:       p.user?.name  || '—',
+          email:      p.user?.email || '—',
+          file_name:  p.cvFilename,
+          file_url:   `/uploads/cvs/user_${p.userId}/${p.cvFilename}`,
+          created_at: p.updatedAt ? new Date(p.updatedAt).toISOString() : null,
+        }));
+    }
+
+    res.json(resumes);
   } catch (err) {
     console.error('Admin resumes error:', err.message);
     res.status(500).json({ error: 'Failed to load resumes' });
