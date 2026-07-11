@@ -29,20 +29,14 @@ router.get('/stats', adminAuth, async (req, res) => {
       usersToday,
     ] = await Promise.all([
       prisma.user.count(),
-      // Fixed: 'active' → 'ACTIVE' (Prisma enum)
       prisma.user.count({ where: { subscriptionStatus: 'ACTIVE' } }),
       prisma.application.count(),
       prisma.job.count({ where: { isActive: true } }),
       prisma.job.count(),
-      // Fixed: 'active' → 'ACTIVE'
       prisma.subscription.count({ where: { status: 'ACTIVE' } }),
-      // Fixed: 'free' → 'FREE'
       prisma.user.count({ where: { plan: 'FREE' } }),
-      // Fixed: 'starter' → 'STARTER'
       prisma.user.count({ where: { plan: 'STARTER' } }),
-      // Fixed: 'growth' → 'GROWTH'
       prisma.user.count({ where: { plan: 'GROWTH' } }),
-      // Fixed: 'pro' → 'PRO'
       prisma.user.count({ where: { plan: 'PRO' } }),
       prisma.application.count({ where: { createdAt: { gte: today } } }),
       prisma.user.count({ where: { createdAt: { gte: today } } }),
@@ -97,7 +91,6 @@ router.get('/users', adminAuth, async (req, res) => {
       plan:                u.plan.toLowerCase(),
       subscription_status: u.subscriptionStatus.toLowerCase(),
       role:                u.role.toLowerCase(),
-      // Fixed: format Date object → ISO string so frontend renders correctly
       created_at:          fmt(u.createdAt),
       app_count:           u.applications.length,
       cv_filename:         u.resumes?.[0]?.originalName || null,
@@ -126,20 +119,18 @@ router.get('/applications', adminAuth, async (req, res) => {
     });
 
     const formatted = apps.map(a => ({
-      id:         a.id,
-      user_id:    a.userId,
-      job_id:     a.jobId,
-      status:     a.status.toLowerCase(),
+      id:          a.id,
+      user_id:     a.userId,
+      job_id:      a.jobId,
+      status:      a.status.toLowerCase(),
       match_score: a.matchScore,
-      created_at: fmt(a.createdAt),
-      applied_at: fmt(a.appliedAt),
-      // user fields
-      email:      a.user?.email || '',
-      name:       a.user?.name  || '',
-      // job fields
-      job_title:  a.job?.title    || '',
-      company:    a.job?.company  || '',
-      location:   a.job?.location || '',
+      created_at:  fmt(a.createdAt),
+      applied_at:  fmt(a.appliedAt),
+      email:       a.user?.email || '',
+      name:        a.user?.name  || '',
+      job_title:   a.job?.title    || '',
+      company:     a.job?.company  || '',
+      location:    a.job?.location || '',
     }));
 
     res.json(formatted);
@@ -218,7 +209,6 @@ router.get('/subscriptions', adminAuth, async (req, res) => {
 // ── PATCH /api/admin/jobs/:id/toggle ─────────────────────────────────────────
 router.patch('/jobs/:id/toggle', adminAuth, async (req, res) => {
   try {
-    // Fixed: Number(id) → String(id) — Prisma uses String IDs (cuid)
     const job = await prisma.job.findUnique({
       where: { id: String(req.params.id) },
     });
@@ -230,7 +220,7 @@ router.patch('/jobs/:id/toggle', adminAuth, async (req, res) => {
     });
 
     res.json({
-      message:  updated.isActive ? 'Job activated' : 'Job deactivated',
+      message:   updated.isActive ? 'Job activated' : 'Job deactivated',
       is_active: updated.isActive ? 1 : 0,
     });
 
@@ -243,7 +233,6 @@ router.patch('/jobs/:id/toggle', adminAuth, async (req, res) => {
 // ── DELETE /api/admin/jobs/:id ────────────────────────────────────────────────
 router.delete('/jobs/:id', adminAuth, async (req, res) => {
   try {
-    // Fixed: Number(id) → String(id)
     await prisma.job.delete({ where: { id: String(req.params.id) } });
     res.json({ message: 'Job deleted' });
   } catch (err) {
@@ -256,14 +245,12 @@ router.delete('/jobs/:id', adminAuth, async (req, res) => {
 router.patch('/users/:id/plan', adminAuth, async (req, res) => {
   try {
     const { plan } = req.body;
-    // Fixed: validate against uppercase Prisma enum values
     const validPlans = ['FREE', 'STARTER', 'GROWTH', 'PRO'];
     const planUpper  = plan?.toUpperCase();
     if (!validPlans.includes(planUpper)) {
       return res.status(400).json({ error: 'Invalid plan' });
     }
 
-    // Fixed: Number(id) → String(id)
     await prisma.user.update({
       where: { id: String(req.params.id) },
       data: {
@@ -297,16 +284,16 @@ router.post('/jobs', adminAuth, async (req, res) => {
       data: {
         title,
         company,
-        location:    location    || '',
-        remote:      !!remote,
-        description: description || '',
+        location:     location     || '',
+        remote:       !!remote,
+        description:  description  || '',
         requirements: requirements || '',
-        salary:      salary      || '',
-        jobUrl:      job_url     || '',
-        applyEmail:  apply_email || '',
-        applyUrl:    apply_url   || '',
-        source:      source      || 'admin',
-        isActive:    true,
+        salary:       salary       || '',
+        jobUrl:       job_url      || '',
+        applyEmail:   apply_email  || '',
+        applyUrl:     apply_url    || '',
+        source:       source       || 'admin',
+        isActive:     true,
       },
     });
 
@@ -318,13 +305,15 @@ router.post('/jobs', adminAuth, async (req, res) => {
   }
 });
 
-
 // ── GET /api/admin/resumes ────────────────────────────────────────────────────
+// Returns all uploaded CVs with correct Render download URLs
 router.get('/resumes', adminAuth, async (req, res) => {
   try {
-    // Try Prisma resume model first (Prisma migration)
+    const BACKEND_URL = process.env.BACKEND_URL || 'https://ai-africa-jobbot.onrender.com';
     let resumes = [];
+
     try {
+      // Primary: use Prisma resume model
       const rows = await prisma.resume.findMany({
         include: {
           user: { select: { id: true, email: true, name: true } },
@@ -334,18 +323,22 @@ router.get('/resumes', adminAuth, async (req, res) => {
       });
 
       resumes = rows.map(r => ({
-        id:          r.id,
-        user_id:     r.userId,
-        name:        r.user?.name  || '—',
-        email:       r.user?.email || '—',
-        file_name:   r.originalName,
-        file_url:    r.fileUrl,
-        file_size:   r.fileSize,
-        mime_type:   r.mimeType,
-        created_at:  r.createdAt ? new Date(r.createdAt).toISOString() : null,
+        id:         r.id,
+        user_id:    r.userId,
+        name:       r.user?.name  || '—',
+        email:      r.user?.email || '—',
+        file_name:  r.originalName,
+        // Use absolute Render URL so Netlify frontend downloads correctly
+        file_url:   r.fileUrl
+          ? (r.fileUrl.startsWith('http') ? r.fileUrl : `${BACKEND_URL}${r.fileUrl}`)
+          : `${BACKEND_URL}/uploads/cvs/user_${r.userId}/${r.originalName}`,
+        file_size:  r.fileSize,
+        mime_type:  r.mimeType,
+        created_at: fmt(r.createdAt),
       }));
+
     } catch (prismaErr) {
-      // Fallback: read from profile cvFilename if resume model not available
+      // Fallback: read cvFilename from profiles table
       console.warn('Resume model query failed, falling back to profiles:', prismaErr.message);
 
       const profiles = await prisma.profile.findMany({
@@ -365,12 +358,14 @@ router.get('/resumes', adminAuth, async (req, res) => {
           name:       p.user?.name  || '—',
           email:      p.user?.email || '—',
           file_name:  p.cvFilename,
-          file_url:   `https://ai-africa-jobbot.onrender.com/uploads/cvs/user_${p.userId}/${p.cvFilename}`,
-          created_at: p.updatedAt ? new Date(p.updatedAt).toISOString() : null,
+          // Fixed: absolute Render URL including user subfolder
+          file_url:   `${BACKEND_URL}/uploads/cvs/user_${p.userId}/${p.cvFilename}`,
+          created_at: fmt(p.updatedAt),
         }));
     }
 
     res.json(resumes);
+
   } catch (err) {
     console.error('Admin resumes error:', err.message);
     res.status(500).json({ error: 'Failed to load resumes' });

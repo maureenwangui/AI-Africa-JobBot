@@ -1,31 +1,29 @@
 // server.js — Africa JobBot Production Server
 require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
-const path = require('path');
+const express    = require('express');
+const cors       = require('cors');
+const helmet     = require('helmet');
+const morgan     = require('morgan');
+const rateLimit  = require('express-rate-limit');
+const path       = require('path');
+const fs         = require('fs');
 
-// Initialize DB on startup
-require('./db/init');
-
-const app = express();
-app.set('trust proxy', 1);
-
+const app  = express();
 const PORT = process.env.PORT || 5000;
 
-// ─── Security ────────────────────────────────────────────────────────────────
+app.set('trust proxy', 1);
+
+// ─── Security ─────────────────────────────────────────────────────────────────
 app.use(
   helmet({
-    contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false
+    contentSecurityPolicy:    false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allow CV downloads from Netlify
   })
 );
 
 app.use(cors({
   origin: function(origin, callback) {
-    console.log("Incoming Origin:", origin);
     // Allow requests with no origin (mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
 
@@ -64,7 +62,7 @@ const authLimiter = rateLimit({
 app.use('/api/', limiter);
 app.use('/api/auth/', authLimiter);
 
-// ─── Logging ─────────────────────────────────────────────────────────────────
+// ─── Logging ──────────────────────────────────────────────────────────────────
 if (process.env.NODE_ENV !== 'production') app.use(morgan('dev'));
 
 // ─── Body Parsing ─────────────────────────────────────────────────────────────
@@ -72,13 +70,24 @@ if (process.env.NODE_ENV !== 'production') app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// ─── Static (CV uploads) ─────────────────────────────────────────────────────
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// ─── Static Files — CV uploads ───────────────────────────────────────────────
+// Serves files from backend/uploads/ at /uploads/...
+// Netlify frontend downloads CVs directly from:
+//   https://ai-africa-jobbot.onrender.com/uploads/cvs/user_USERID/FILENAME.pdf
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
-// Serve frontend
+app.use('/uploads', (req, res, next) => {
+  // Allow cross-origin downloads from Netlify
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET');
+  next();
+}, express.static(uploadsDir));
+
+// Serve frontend (for local development)
 app.use(express.static(path.join(__dirname, '../frontend')));
 
-// ─── Routes ──────────────────────────────────────────────────────────────────
+// ─── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api/auth',          require('./routes/auth'));
 app.use('/api/profile',       require('./routes/profile'));
 app.use('/api/jobs',          require('./routes/jobs'));
@@ -91,7 +100,11 @@ app.use('/api/webhooks',      require('./routes/webhooks'));
 app.use('/api/ai',            require('./routes/ai'));
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
-app.get('/health', (req, res) => res.json({ status: 'ok', service: 'Africa JobBot API', version: '1.0.0' }));
+app.get('/health', (req, res) => res.json({
+  status:  'ok',
+  service: 'Africa JobBot API',
+  version: '1.0.0',
+}));
 
 // ─── Global Error Handler ─────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
@@ -101,16 +114,22 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ─── Start Cron Jobs ─────────────────────────────────────────────────────────
+// ─── Start Cron Jobs ──────────────────────────────────────────────────────────
 require('./services/cronJobs');
 
-// Keep Render awake — ping every 10 minutes
+// ─── Keep Render awake — ping every 10 minutes ───────────────────────────────
 if (process.env.NODE_ENV === 'production') {
   setInterval(() => {
-    const url = process.env.BACKEND_URL + '/health';
+    const url = (process.env.BACKEND_URL || 'https://ai-africa-jobbot.onrender.com') + '/health';
     fetch(url).catch(() => {});
   }, 10 * 60 * 1000);
 }
+
+// ─── Connect to PostgreSQL via Prisma ────────────────────────────────────────
+const prisma = require('./confiq/prisma');
+prisma.$connect()
+  .then(() => console.log('✅ Connected to PostgreSQL via Prisma'))
+  .catch(err => console.error('❌ Database connection failed:', err.message));
 
 app.listen(PORT, () => {
   console.log(`🚀 Africa JobBot API running on port ${PORT}`);
