@@ -48,7 +48,13 @@ const token = jwt.sign(
   }
 );
 
+try {
+
 await emailService.sendWelcome(email, name);
+} catch (emailErr) {
+console.error('Welcome email failed:', emailErr.message);
+
+}
 
 res.status(201).json({
   token,

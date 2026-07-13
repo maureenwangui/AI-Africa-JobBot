@@ -473,7 +473,7 @@ async function doAdminLogin() {
 
     const me     = await meRes.json();
 
-    if (me.role !== 'ADMIN') {
+    if (me.role !== 'admin') {
       TOK = null;
       throw new Error('Access denied. Your account (' + email + ') does not have admin role.\n\nRun in CMD:\nnode make-admin.js ' + email);
     }
