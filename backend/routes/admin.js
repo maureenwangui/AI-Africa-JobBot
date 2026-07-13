@@ -74,9 +74,15 @@ router.get('/users', adminAuth, async (req, res) => {
     const users = await prisma.user.findMany({
       include: {
         profile:      true,
+        // Get latest resume for cv_filename display in admin
         resumes: {
           orderBy: { createdAt: 'desc' },
           take: 1,
+          select: {
+            originalName: true,
+            fileUrl:      true,
+            createdAt:    true,
+          },
         },
         applications: { select: { id: true } },
       },
@@ -93,8 +99,10 @@ router.get('/users', adminAuth, async (req, res) => {
       role:                u.role.toLowerCase(),
       created_at:          fmt(u.createdAt),
       app_count:           u.applications.length,
+      // Fix: read from resumes table (Cloudinary URL) not profile.cvFilename
       cv_filename:         u.resumes?.[0]?.originalName || null,
-      skills:              u.profile?.skills        || null,
+      cv_url:              u.resumes?.[0]?.fileUrl      || null,
+      skills:              u.profile?.skills            || null,
       preferred_location:  u.profile?.preferredLocations || null,
     }));
 
