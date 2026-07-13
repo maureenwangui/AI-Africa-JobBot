@@ -1,25 +1,17 @@
-// routes/profile.js — Migrated from SQLite to Prisma + Cloudinary CV storage
-// SQLite replaced:
-//   getDb() + db.prepare('SELECT * FROM profiles WHERE user_id = ?').get()
-//   → prisma.profile.findUnique({ where: { userId } })
-//
-//   db.prepare('UPDATE profiles SET skills = ?, ... WHERE user_id = ?').run()
-//   → prisma.profile.upsert({ where: { userId }, update: { ... }, create: { ... } })
-//
-//   db.prepare('UPDATE profiles SET cv_filename = ?, ... WHERE user_id = ?').run()
-//   → prisma.profile.upsert + prisma.resume.create with Cloudinary CDN URL
-
+// routes/profile.js — Prisma + Cloudinary + PDF/DOCX text extraction
 const express    = require('express');
 const multer     = require('multer');
 const path       = require('path');
+const fs         = require('fs');
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const prisma     = require('../confiq/prisma');
 const { auth }   = require('../middleware/auth');
+const aiService  = require('../services/aiService');
 
 const router = express.Router();
 
-// ── Cloudinary config — reads from .env ──────────────────────────────────────
+// ── Cloudinary config ─────────────────────────────────────────────────────────
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key:    process.env.CLOUDINARY_API_KEY,
@@ -32,14 +24,14 @@ const storage = new CloudinaryStorage({
   params: async (req, file) => ({
     folder:        `africa-jobbot/cvs/user_${req.user.id}`,
     public_id:     `cv_${req.user.id}_${Date.now()}`,
-    resource_type: 'raw',  // raw = non-image files (PDF, DOCX, DOC)
+    resource_type: 'raw',
     format:        path.extname(file.originalname).slice(1).toLowerCase(),
   }),
 });
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ['.pdf', '.doc', '.docx'];
     if (!allowed.includes(path.extname(file.originalname).toLowerCase())) {
@@ -48,6 +40,30 @@ const upload = multer({
     cb(null, true);
   },
 });
+
+// ── Text extraction helpers ───────────────────────────────────────────────────
+async function extractTextFromFile(filePath, originalName) {
+  const ext = path.extname(originalName).toLowerCase();
+  try {
+    if (ext === '.pdf') {
+      const pdfParse = require('pdf-parse');
+      const buffer   = fs.readFileSync(filePath);
+      const data     = await pdfParse(buffer);
+      return data.text || '';
+    }
+    if (ext === '.docx' || ext === '.doc') {
+      const mammoth = require('mammoth');
+      const result  = await mammoth.extractRawText({ path: filePath });
+      return result.value || '';
+    }
+    if (ext === '.txt') {
+      return fs.readFileSync(filePath, 'utf8');
+    }
+  } catch (e) {
+    console.error('Text extraction error:', e.message);
+  }
+  return '';
+}
 
 // ── GET /api/profile ──────────────────────────────────────────────────────────
 router.get('/', auth, async (req, res) => {
@@ -60,9 +76,7 @@ router.get('/', auth, async (req, res) => {
       }),
     ]);
 
-    if (!profile) {
-      return res.status(404).json({ error: 'Profile not found' });
-    }
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
     const parseField = (val) => {
       if (!val) return val;
@@ -72,12 +86,12 @@ router.get('/', auth, async (req, res) => {
     res.json({
       id:                 profile.id,
       user_id:            profile.userId,
-      cv_filename:        latestResume?.originalName  || null,
-      cv_url:             latestResume?.fileUrl        || null,
+      cv_filename:        latestResume?.originalName   || null,
+      cv_url:             latestResume?.fileUrl         || null,
       skills:             parseField(profile.skills),
       experience:         parseField(profile.experience),
       education:          parseField(profile.education),
-      keywords:           [],
+      keywords:           parseField(profile.keywords) || [],
       preferred_roles:    parseField(profile.preferredRoles),
       preferred_location: profile.preferredLocations,
       remote_preference:  profile.remotePreference ? 1 : 0,
@@ -101,25 +115,19 @@ router.get('/', auth, async (req, res) => {
 router.put('/', auth, async (req, res) => {
   try {
     const {
-      skills,
-      experience,
-      education,
-      preferred_roles,
-      preferred_location,
-      remote_preference,
-      summary,
-      headline,
-      linkedin,
-      github,
-      portfolio,
+      skills, experience, education, keywords,
+      preferred_roles, preferred_location,
+      remote_preference, summary, headline,
+      linkedin, github, portfolio,
     } = req.body;
 
     const data = {
       skills:             skills          ? JSON.stringify(skills)          : undefined,
       experience:         experience      ? JSON.stringify(experience)      : undefined,
       education:          education       ? JSON.stringify(education)       : undefined,
+      keywords:           keywords        ? JSON.stringify(keywords)        : undefined,
       preferredRoles:     preferred_roles ? JSON.stringify(preferred_roles) : undefined,
-      preferredLocations: preferred_location ?? undefined,
+      preferredLocations: preferred_location   ?? undefined,
       remotePreference:   remote_preference !== undefined ? !!remote_preference : undefined,
       summary:            summary   ?? undefined,
       headline:           headline  ?? undefined,
@@ -145,68 +153,113 @@ router.put('/', auth, async (req, res) => {
 });
 
 // ── POST /api/profile/upload-cv ───────────────────────────────────────────────
-// Cloudinary uploads the file and sets req.file.path = permanent CDN URL
-// req.file.filename = public_id on Cloudinary
 router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
+  // temp local path for text extraction before Cloudinary (multer-storage-cloudinary
+  // uploads directly — we need to download briefly or use memoryStorage for extraction)
+  // Solution: use temp memory buffer approach via multer memoryStorage fallback
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    // Cloudinary provides the permanent CDN URL in req.file.path
-    const cloudUrl      = req.file.path;       // e.g. https://res.cloudinary.com/your-cloud/raw/upload/...
+    // Cloudinary URL is in req.file.path after CloudinaryStorage upload
+    const cloudUrl      = req.file.path;
     const originalName  = req.file.originalname;
     const fileSize      = req.file.size;
     const fileType      = path.extname(originalName).slice(1).toLowerCase();
 
-    // Skill extraction via keyword matching
-    // Note: extractedText is empty for binary PDF/DOCX — add pdf-parse later for full extraction
-    const skillList = [
-      'project management',
-      'monitoring and evaluation',
-      'budgeting',
-      'report writing',
-      'microsoft excel',
-      'microsoft word',
-      'communication',
-      'leadership',
-      'data analysis',
-    ];
-    // For now skills will be empty until pdf-parse is added
-    // Text extraction from PDF/DOCX requires pdf-parse / mammoth packages
-    const extractedSkills = [];
+    // ── Text extraction ───────────────────────────────────────────────────────
+    // Cloudinary storage uploads directly — no local file path available.
+    // We download from Cloudinary temporarily for text extraction.
+    let extractedText = '';
+    const tempPath = path.join(__dirname, `../uploads/temp_${req.user.id}_${Date.now()}.${fileType}`);
 
-    // 1 — Save skills to profile
-    await prisma.profile.upsert({
-      where:  { userId: String(req.user.id) },
-      update: {
-        skills: extractedSkills.length > 0
-          ? extractedSkills.join(', ')
-          : undefined,
-      },
-      create: {
-        userId: String(req.user.id),
-        skills: extractedSkills.join(', '),
-      },
-    });
+    try {
+      // Create temp dir if needed
+      const tempDir = path.join(__dirname, '../uploads');
+      if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-    // 2 — Save resume record with permanent Cloudinary URL
-    const resume = await prisma.resume.create({
-      data: {
-        userId:             String(req.user.id),
-        originalName:       originalName,
-        fileUrl:            cloudUrl,        // ← permanent Cloudinary CDN URL, never breaks on redeploy
-        fileSize:           fileSize,
-        mimeType:           fileType,
-        parsedSuccessfully: false,
-        uploadSource:       'profile',
-      },
-    });
+      // Download from Cloudinary to temp file
+      const axios  = require('axios');
+      const writer = fs.createWriteStream(tempPath);
+      const response = await axios({ url: cloudUrl, method: 'GET', responseType: 'stream' });
+      await new Promise((resolve, reject) => {
+        response.data.pipe(writer);
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+      });
+
+      // Extract text from temp file
+      extractedText = await extractTextFromFile(tempPath, originalName);
+    } catch (e) {
+      console.error('Text extraction failed (non-fatal):', e.message);
+    } finally {
+      // Always clean up temp file
+      if (fs.existsSync(tempPath)) {
+        try { fs.unlinkSync(tempPath); } catch {}
+      }
+    }
+
+    // ── AI skill extraction ───────────────────────────────────────────────────
+    let extracted = { skills: [], experience: [], education: [], keywords: [], summary: '' };
+
+    if (extractedText && extractedText.trim().length > 50) {
+      // Have real text — use AI
+      try {
+        extracted = await aiService.extractCvData(extractedText);
+        console.log(`✅ AI extracted ${extracted.skills?.length || 0} skills from CV`);
+      } catch (e) {
+        console.error('AI extraction failed (non-fatal):', e.message);
+        // Fallback to keyword matching if AI fails
+        extracted.skills = extractSkillsByKeyword(extractedText);
+      }
+    } else {
+      // No text extracted (scanned PDF etc.) — use keyword fallback
+      console.warn('⚠️ No text extracted from CV — using keyword fallback');
+      extracted.skills = [];
+    }
+
+    // ── Save to database ──────────────────────────────────────────────────────
+    await prisma.$transaction([
+      prisma.profile.upsert({
+        where:  { userId: String(req.user.id) },
+        update: {
+          skills:     JSON.stringify(extracted.skills     || []),
+          experience: JSON.stringify(extracted.experience || []),
+          education:  JSON.stringify(extracted.education  || []),
+          keywords:   JSON.stringify(extracted.keywords   || []),
+          summary:    extracted.summary || '',
+        },
+        create: {
+          userId:     String(req.user.id),
+          skills:     JSON.stringify(extracted.skills     || []),
+          experience: JSON.stringify(extracted.experience || []),
+          education:  JSON.stringify(extracted.education  || []),
+          keywords:   JSON.stringify(extracted.keywords   || []),
+          summary:    extracted.summary || '',
+        },
+      }),
+
+      prisma.resume.create({
+        data: {
+          userId:       String(req.user.id),
+          originalName: originalName,
+          fileUrl:      cloudUrl,       // permanent Cloudinary CDN URL
+          fileSize:     fileSize,
+          mimeType:     fileType,
+        },
+      }),
+    ]);
 
     res.json({
-      message:   'CV uploaded successfully',
+      message:   'CV uploaded and parsed successfully',
       filename:  originalName,
       file_url:  cloudUrl,
-      resume_id: resume.id,
-      skills:    extractedSkills,
+      extracted: {
+        skills:     extracted.skills     || [],
+        experience: extracted.experience || [],
+        education:  extracted.education  || [],
+        keywords:   extracted.keywords   || [],
+        summary:    extracted.summary    || '',
+      },
     });
 
   } catch (err) {
@@ -214,5 +267,22 @@ router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
     res.status(500).json({ error: err.message || 'CV upload failed' });
   }
 });
+
+// ── Keyword fallback (no AI needed) ──────────────────────────────────────────
+function extractSkillsByKeyword(text) {
+  const lower = text.toLowerCase();
+  const skillList = [
+    'project management', 'monitoring and evaluation', 'budgeting',
+    'report writing', 'microsoft excel', 'microsoft word', 'microsoft office',
+    'communication', 'leadership', 'data analysis', 'data entry',
+    'customer service', 'sales', 'marketing', 'social media',
+    'human resources', 'accounting', 'finance', 'procurement',
+    'supply chain', 'logistics', 'administration', 'research',
+    'python', 'javascript', 'sql', 'excel', 'powerpoint',
+    'teamwork', 'problem solving', 'time management', 'presentation',
+    'negotiation', 'training', 'coaching', 'planning', 'coordination',
+  ];
+  return skillList.filter(skill => lower.includes(skill));
+}
 
 module.exports = router;
