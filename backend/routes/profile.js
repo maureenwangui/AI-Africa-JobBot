@@ -1,36 +1,40 @@
-// routes/profile.js — Migrated from SQLite to Prisma
+// routes/profile.js — Migrated from SQLite to Prisma + Cloudinary CV storage
 // SQLite replaced:
 //   getDb() + db.prepare('SELECT * FROM profiles WHERE user_id = ?').get()
 //   → prisma.profile.findUnique({ where: { userId } })
 //
 //   db.prepare('UPDATE profiles SET skills = ?, ... WHERE user_id = ?').run()
-//   → prisma.profile.update({ where: { userId }, data: { ... } })
+//   → prisma.profile.upsert({ where: { userId }, update: { ... }, create: { ... } })
 //
 //   db.prepare('UPDATE profiles SET cv_filename = ?, ... WHERE user_id = ?').run()
-//   → prisma.profile.upsert({ where: { userId }, update: { ... }, create: { ... } })
+//   → prisma.profile.upsert + prisma.resume.create with Cloudinary CDN URL
 
 const express    = require('express');
 const multer     = require('multer');
 const path       = require('path');
-const fs         = require('fs');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const prisma     = require('../confiq/prisma');
 const { auth }   = require('../middleware/auth');
-const aiService  = require('../services/aiService');
 
 const router = express.Router();
 
-// ── Multer config (unchanged — file upload logic stays the same) ──────────────
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const userFolder = path.join(__dirname, `../uploads/cvs/user_${req.user.id}`);
-    if (!fs.existsSync(userFolder))
-      fs.mkdirSync(userFolder, { recursive: true });
-    cb(null, userFolder);
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `cv_${req.user.id}_${Date.now()}${ext}`);
-  },
+// ── Cloudinary config — reads from .env ──────────────────────────────────────
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key:    process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// ── Multer + Cloudinary storage ───────────────────────────────────────────────
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: async (req, file) => ({
+    folder:        `africa-jobbot/cvs/user_${req.user.id}`,
+    public_id:     `cv_${req.user.id}_${Date.now()}`,
+    resource_type: 'raw',  // raw = non-image files (PDF, DOCX, DOC)
+    format:        path.extname(file.originalname).slice(1).toLowerCase(),
+  }),
 });
 
 const upload = multer({
@@ -46,14 +50,12 @@ const upload = multer({
 });
 
 // ── GET /api/profile ──────────────────────────────────────────────────────────
-// Replaced: db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(req.user.id)
-// With:     prisma.profile.findUnique({ where: { userId } })
 router.get('/', auth, async (req, res) => {
   try {
     const [profile, latestResume] = await Promise.all([
       prisma.profile.findUnique({ where: { userId: String(req.user.id) } }),
       prisma.resume.findFirst({
-        where: { userId: String(req.user.id) },
+        where:   { userId: String(req.user.id) },
         orderBy: { createdAt: 'desc' },
       }),
     ]);
@@ -62,18 +64,16 @@ router.get('/', auth, async (req, res) => {
       return res.status(404).json({ error: 'Profile not found' });
     }
 
-    // Parse JSON fields — same as before
-    // Prisma returns strings stored as JSON, parse them for the response
     const parseField = (val) => {
       if (!val) return val;
       try { return JSON.parse(val); } catch { return val; }
     };
 
-    // Map Prisma camelCase → snake_case to preserve API response shape
     res.json({
       id:                 profile.id,
       user_id:            profile.userId,
-      cv_filename:        latestResume?.originalName || null,
+      cv_filename:        latestResume?.originalName  || null,
+      cv_url:             latestResume?.fileUrl        || null,
       skills:             parseField(profile.skills),
       experience:         parseField(profile.experience),
       education:          parseField(profile.education),
@@ -98,10 +98,6 @@ router.get('/', auth, async (req, res) => {
 });
 
 // ── PUT /api/profile ──────────────────────────────────────────────────────────
-// Replaced:
-//   db.prepare('UPDATE profiles SET skills = ?, ... WHERE user_id = ?').run(...)
-// With:
-//   prisma.profile.upsert({ where: { userId }, update: { ... }, create: { ... } })
 router.put('/', auth, async (req, res) => {
   try {
     const {
@@ -118,7 +114,6 @@ router.put('/', auth, async (req, res) => {
       portfolio,
     } = req.body;
 
-    // Store arrays as JSON strings — same as SQLite behaviour
     const data = {
       skills:             skills          ? JSON.stringify(skills)          : undefined,
       experience:         experience      ? JSON.stringify(experience)      : undefined,
@@ -133,10 +128,8 @@ router.put('/', auth, async (req, res) => {
       portfolio:          portfolio ?? undefined,
     };
 
-    // Remove undefined fields
     Object.keys(data).forEach(k => data[k] === undefined && delete data[k]);
 
-    // upsert — create profile if it doesn't exist yet
     await prisma.profile.upsert({
       where:  { userId: String(req.user.id) },
       update: data,
@@ -152,27 +145,20 @@ router.put('/', auth, async (req, res) => {
 });
 
 // ── POST /api/profile/upload-cv ───────────────────────────────────────────────
-// Replaced:
-//   db.prepare('UPDATE profiles SET cv_filename = ?, skills = ?, ... WHERE user_id = ?').run(...)
-// With:
-//   prisma.profile.upsert({ where: { userId }, update: { cvFilename, skills, ... }, create: { ... } })
-// POST /api/profile/upload-cv
+// Cloudinary uploads the file and sets req.file.path = permanent CDN URL
+// req.file.filename = public_id on Cloudinary
 router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    const filename = req.file.filename;
+    // Cloudinary provides the permanent CDN URL in req.file.path
+    const cloudUrl      = req.file.path;       // e.g. https://res.cloudinary.com/your-cloud/raw/upload/...
+    const originalName  = req.file.originalname;
+    const fileSize      = req.file.size;
+    const fileType      = path.extname(originalName).slice(1).toLowerCase();
 
-    // Read the uploaded file text
-    let extractedText = '';
-    try {
-      extractedText = fs.readFileSync(req.file.path, 'utf8');
-    } catch (e) {
-      extractedText = '';
-    }
-
-    // Extract skills by keyword matching
-    const text = extractedText.toLowerCase();
+    // Skill extraction via keyword matching
+    // Note: extractedText is empty for binary PDF/DOCX — add pdf-parse later for full extraction
     const skillList = [
       'project management',
       'monitoring and evaluation',
@@ -184,36 +170,43 @@ router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
       'leadership',
       'data analysis',
     ];
-    const extractedSkills = skillList.filter(skill => text.includes(skill));
+    // For now skills will be empty until pdf-parse is added
+    // Text extraction from PDF/DOCX requires pdf-parse / mammoth packages
+    const extractedSkills = [];
 
-    // Save to database
+    // 1 — Save skills to profile
     await prisma.profile.upsert({
-      where:  { userId: req.user.id },
+      where:  { userId: String(req.user.id) },
       update: {
-        skills: extractedSkills.join(', '),
+        skills: extractedSkills.length > 0
+          ? extractedSkills.join(', ')
+          : undefined,
       },
       create: {
-        userId: req.user.id,
+        userId: String(req.user.id),
         skills: extractedSkills.join(', '),
       },
     });
 
-    await prisma.resume.create({
+    // 2 — Save resume record with permanent Cloudinary URL
+    const resume = await prisma.resume.create({
       data: {
-        userId:           String(req.user.id),
-        originalName:     req.file.originalname,
-        fileUrl:          `/uploads/cvs/user_${req.user.id}/${filename}`,
-        fileType:         path.extname(req.file.originalname).slice(1).toLowerCase(),
-        fileSize:         req.file.size,
-        parsedSuccessfully: extractedSkills.length > 0,
-        uploadSource:     'profile',
+        userId:             String(req.user.id),
+        originalName:       originalName,
+        fileUrl:            cloudUrl,        // ← permanent Cloudinary CDN URL, never breaks on redeploy
+        fileSize:           fileSize,
+        mimeType:           fileType,
+        parsedSuccessfully: false,
+        uploadSource:       'profile',
       },
     });
 
     res.json({
-      message:  'CV uploaded successfully',
-      filename,
-      skills:   extractedSkills,
+      message:   'CV uploaded successfully',
+      filename:  originalName,
+      file_url:  cloudUrl,
+      resume_id: resume.id,
+      skills:    extractedSkills,
     });
 
   } catch (err) {

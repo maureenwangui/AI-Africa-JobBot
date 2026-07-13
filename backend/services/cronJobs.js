@@ -34,8 +34,8 @@ cron.schedule('0 */6 * * *', async () => {
   const activeUsers = rawUsers.map(({ profile, ...user }) => ({ ...user, ...profile }));
 
   const jobs = await prisma.job.findMany({
-    where:   { is_active: true },
-    orderBy: { created_at: 'desc' },
+    where:   { status: 'ACTIVE' },
+    orderBy: { createdAt: 'desc' },
     take:    500,
   });
 
