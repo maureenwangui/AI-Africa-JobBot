@@ -1,163 +1,174 @@
 // services/cronJobs.js
-const cron = require('node-cron');
-const prisma = require('../confiq/prisma');
-const matchingService = require('./matchingService');
-const notificationService = require('./notificationService');
-const emailService = require('./emailService');
+// Fixed: new PrismaClient() → shared singleton
+// Fixed: subscription_status → subscriptionStatus (camelCase)
+// Fixed: cv_filename → resumes relation (users now have resumes table)
+// Fixed: Job query uses status: 'ACTIVE' not isActive: true
+// Fixed: prisma.usageLimit → prisma.usage
+// Fixed: application create uses camelCase and uppercase status enum
+// Fixed: application findFirst uses camelCase fields
+// Fixed: daily email query uses camelCase
+const cron                   = require('node-cron');
+const prisma                 = require('../confiq/prisma');
+const aiService              = require('./aiService');
+const emailService           = require('./emailService');
+const notificationService    = require('./notificationService');
+const matchingService        = require('./matchingService');
 
-// Users eligible for matching/summaries: on the free plan, or on a paid plan
-// with an active subscription.
-const ELIGIBLE_USER_FILTER = {
-  OR: [
-    { plan: 'FREE' },
-    { subscriptionStatus: 'ACTIVE' },
-  ],
-};
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  JOB MATCHING — every 6 hours
-// ══════════════════════════════════════════════════════════════════════════════
+// ── Job Matching Cron — every 6 hours ─────────────────────────────────────────
 cron.schedule('0 */6 * * *', async () => {
-  console.log('🤖 Running job matching cycle...');
-
+  console.log('⏰ Running job matching cron...');
   try {
-    // Only consider users who have uploaded at least one CV/resume.
-    const rawUsers = await prisma.user.findMany({
+    // Fixed: subscriptionStatus camelCase, FREE uppercase enum
+    const users = await prisma.user.findMany({
       where: {
-        ...ELIGIBLE_USER_FILTER,
+        NOT: { subscriptionStatus: 'CANCELLED' },
+        plan: { not: 'FREE' },
+        // Only users who have uploaded a CV
         resumes: { some: {} },
       },
-      select: {
-        id: true, email: true, phone: true, name: true, plan: true,
-        profile: {
-          select: {
-            skills: true, summary: true, experience: true,
-            preferredRoles: true, preferredLocations: true, remotePreference: true,
-          },
+      include: {
+        profile: true,
+        resumes: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
         },
       },
     });
 
-    // Flatten: { ...user, ...user.profile } so matchingService gets one flat object
-    const activeUsers = rawUsers
-      .filter(u => u.profile)
-      .map(({ profile, ...user }) => ({ ...user, ...profile }));
+    console.log(`🔍 Matching jobs for ${users.length} users...`);
 
-    const jobs = await prisma.job.findMany({
+    // Fixed: status: 'ACTIVE' not isActive: true
+    const activeJobs = await prisma.job.findMany({
       where:   { status: 'ACTIVE' },
-      include: { company: true },
-      orderBy: { createdAt: 'desc' },
+      include: { company: { select: { name: true } } },
       take:    500,
     });
 
-    for (const user of activeUsers) {
-      try {
-        const matches    = await matchingService.matchJobsToProfile(user, jobs);
-        const topMatches = matches.filter(j => j.match_score >= 60).slice(0, 5);
-
-        if (topMatches.length === 0) continue;
-
-        if (user.plan === 'BUSINESS') {
-          const month = new Date().toISOString().slice(0, 7);
-
-          const usageRecord = await prisma.usage.findFirst({
-            where:  { userId: user.id, month },
-            select: { applicationsUsed: true },
-          });
-          const used = usageRecord?.applicationsUsed || 0;
-
-          if (used < 200) {
-            for (const job of topMatches.slice(0, 3)) {
-              const already = await prisma.application.findFirst({
-                where:  { userId: user.id, jobId: job.id },
-                select: { id: true },
-              });
-              if (already) continue;
-
-              await prisma.application.create({
-                data: {
-                  userId:               user.id,
-                  jobId:                job.id,
-                  matchScore:           job.match_score,
-                  status:               'APPLIED',
-                  appliedAutomatically: true,
-                  appliedAt:            new Date(),
-                },
-              });
-
-              // Atomic upsert with increment — race-condition safe.
-              await prisma.usage.upsert({
-                where:  { userId_month: { userId: user.id, month } },
-                update: { applicationsUsed: { increment: 1 } },
-                create: {
-                  userId:                user.id,
-                  month,
-                  applicationsUsed:      1,
-                  resumesOptimized:      0,
-                  coverLettersGenerated: 0,
-                },
-              });
-
-              notificationService
-                .sendApplicationAlert(user, { title: job.title, company: job.company?.name || 'the company' })
-                .catch(console.error);
-            }
-          }
-        } else {
-          // Notify non-Business users of matches instead of auto-applying
-          notificationService.sendMatchAlert(user, topMatches.length).catch(console.error);
-        }
-      } catch (err) {
-        console.error(`Matching error for user ${user.id}:`, err.message);
-      }
-    }
-
-    console.log(`✅ Job matching done for ${activeUsers.length} users`);
-  } catch (err) {
-    console.error('Job matching cycle failed:', err.message);
-  }
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  DAILY SUMMARY EMAILS — every day at 8am Nairobi time (UTC+3 = 5am UTC)
-// ══════════════════════════════════════════════════════════════════════════════
-cron.schedule('0 5 * * *', async () => {
-  console.log('📧 Sending daily summaries...');
-
-  try {
-    const users = await prisma.user.findMany({
-      where: ELIGIBLE_USER_FILTER,
-      select: {
-        id: true, email: true, name: true, phone: true, plan: true,
-      },
-    });
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Flatten company relation
+    const flatJobs = activeJobs.map(j => ({ ...j, company: j.company?.name || '' }));
 
     for (const user of users) {
       try {
-        const [totalApplications, newMatches] = await Promise.all([
-          prisma.application.count({
-            where: { userId: user.id },
-          }),
-          prisma.application.count({
-            where: { userId: user.id, createdAt: { gte: today } },
-          }),
-        ]);
+        if (!user.profile) continue;
 
-        await emailService.sendDailySummary(user, {
-          total_applications: totalApplications,
-          new_matches:        newMatches,
+        const matches = await matchingService.matchJobsToProfile(user.profile, flatJobs);
+        if (!matches?.length) continue;
+
+        const month = new Date().toISOString().slice(0, 7);
+
+        // Fixed: plan limits from normalized lowercase plan
+        const planKey = user.plan.toLowerCase();
+        const maxApps = {
+          starter: 20, growth: 80, pro: 200, free: 3
+        }[planKey] || 3;
+
+        // Fixed: prisma.usage not usageLimit, userId_month composite key
+        const usage = await prisma.usage.findUnique({
+          where: { userId_month: { userId: user.id, month } },
         });
+        const used = usage?.applicationsUsed || 0;
+
+        if (used >= maxApps) {
+          console.log(`⏭  ${user.email}: limit reached (${used}/${maxApps})`);
+          continue;
+        }
+
+        let applied = 0;
+
+        for (const job of matches.slice(0, maxApps - used)) {
+          try {
+            // Fixed: camelCase fields, jobId as String
+            const existing = await prisma.application.findFirst({
+              where: { userId: user.id, jobId: String(job.id) },
+            });
+            if (existing) continue;
+
+            // Fixed: camelCase fields, 'APPLIED' uppercase enum
+            await prisma.application.create({
+              data: {
+                userId:               user.id,
+                jobId:                String(job.id),
+                status:               'APPLIED',
+                appliedAt:            new Date(),
+                appliedAutomatically: true,
+                matchScore:           job.score || 0,
+              },
+            });
+
+            // Fixed: prisma.usage upsert with camelCase + increment
+            await prisma.usage.upsert({
+              where:  { userId_month: { userId: user.id, month } },
+              update: { applicationsUsed: { increment: 1 } },
+              create: { userId: user.id, month, applicationsUsed: 1, resumesOptimized: 0, coverLettersGenerated: 0, aiCreditsUsed: 0 },
+            });
+
+            applied++;
+          } catch (err) {
+            console.error(`  ❌ Failed to apply for ${user.email} to ${job.title}:`, err.message);
+          }
+        }
+
+        if (applied > 0) {
+          console.log(`  ✅ ${user.email}: ${applied} applications sent`);
+          await notificationService.sendMatchAlert(
+            { id: user.id, email: user.email, name: user.name, phone: user.phone },
+            matches.slice(0, applied)
+          );
+        }
+
       } catch (err) {
-        console.error(err);
+        console.error(`  ❌ Error matching for ${user.email}:`, err.message);
       }
     }
 
-    console.log('✅ Daily summaries sent');
+    console.log('✅ Job matching cron complete');
   } catch (err) {
-    console.error('Daily summary cycle failed:', err.message);
+    console.error('❌ Job matching cron failed:', err.message);
+  }
+});
+
+// ── Daily Summary Email — 8am EAT (5am UTC) ───────────────────────────────────
+cron.schedule('0 5 * * *', async () => {
+  console.log('📧 Sending daily summaries...');
+  try {
+    const today    = new Date();
+    today.setHours(0, 0, 0, 0);
+    const month    = today.toISOString().slice(0, 7);
+
+    // Fixed: subscriptionStatus camelCase, NOT FREE uppercase
+    const users = await prisma.user.findMany({
+      where: {
+        plan: { not: 'FREE' },
+        NOT: { subscriptionStatus: 'CANCELLED' },
+      },
+      select: { id: true, email: true, name: true, phone: true },
+    });
+
+    for (const user of users) {
+      try {
+        // Fixed: camelCase fields, APPLIED uppercase
+        const [todayApps, totalApps, usage] = await Promise.all([
+          prisma.application.count({ where: { userId: user.id, createdAt: { gte: today } } }),
+          prisma.application.count({ where: { userId: user.id } }),
+          prisma.usage.findUnique({ where: { userId_month: { userId: user.id, month } } }),
+        ]);
+
+        const stats = {
+          applied:         todayApps,
+          total_applied:   totalApps,
+          this_month:      usage?.applicationsUsed || 0,
+          date:            today.toLocaleDateString('en-KE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+        };
+
+        await notificationService.sendDailySummary(user, stats);
+      } catch (err) {
+        console.error(`  ❌ Daily summary failed for ${user.email}:`, err.message);
+      }
+    }
+
+    console.log(`✅ Daily summaries sent to ${users.length} users`);
+  } catch (err) {
+    console.error('❌ Daily summary cron failed:', err.message);
   }
 });
 
