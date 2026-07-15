@@ -91,7 +91,6 @@ router.get('/', auth, async (req, res) => {
       skills:             parseField(profile.skills),
       experience:         parseField(profile.experience),
       education:          parseField(profile.education),
-      keywords:           parseField(profile.keywords) || [],
       preferred_roles:    parseField(profile.preferredRoles),
       preferred_location: profile.preferredLocations,
       remote_preference:  profile.remotePreference ? 1 : 0,
@@ -121,11 +120,18 @@ router.put('/', auth, async (req, res) => {
       linkedin, github, portfolio,
     } = req.body;
 
+    // Profile has no dedicated `keywords` column — merge any submitted
+    // keywords into `skills` (deduplicated) instead of writing an invalid field.
+    const mergedSkills = (() => {
+      if (!skills && !keywords) return undefined;
+      const combined = [...(Array.isArray(skills) ? skills : []), ...(Array.isArray(keywords) ? keywords : [])];
+      return JSON.stringify([...new Set(combined)]);
+    })();
+
     const data = {
-      skills:             skills          ? JSON.stringify(skills)          : undefined,
+      skills:             mergedSkills,
       experience:         experience      ? JSON.stringify(experience)      : undefined,
       education:          education       ? JSON.stringify(education)       : undefined,
-      keywords:           keywords        ? JSON.stringify(keywords)        : undefined,
       preferredRoles:     preferred_roles ? JSON.stringify(preferred_roles) : undefined,
       preferredLocations: preferred_location   ?? undefined,
       remotePreference:   remote_preference !== undefined ? !!remote_preference : undefined,
@@ -218,33 +224,39 @@ router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
     }
 
     // ── Save to database ──────────────────────────────────────────────────────
+    // Profile has no dedicated `keywords` column — merge extracted keywords
+    // into `skills` (deduplicated) so nothing extracted by the AI is lost.
+    const mergedSkills = JSON.stringify([
+      ...new Set([...(extracted.skills || []), ...(extracted.keywords || [])]),
+    ]);
+
     await prisma.$transaction([
       prisma.profile.upsert({
         where:  { userId: String(req.user.id) },
         update: {
-          skills:     JSON.stringify(extracted.skills     || []),
+          skills:     mergedSkills,
           experience: JSON.stringify(extracted.experience || []),
           education:  JSON.stringify(extracted.education  || []),
-          keywords:   JSON.stringify(extracted.keywords   || []),
           summary:    extracted.summary || '',
         },
         create: {
           userId:     String(req.user.id),
-          skills:     JSON.stringify(extracted.skills     || []),
+          skills:     mergedSkills,
           experience: JSON.stringify(extracted.experience || []),
           education:  JSON.stringify(extracted.education  || []),
-          keywords:   JSON.stringify(extracted.keywords   || []),
           summary:    extracted.summary || '',
         },
       }),
 
       prisma.resume.create({
         data: {
-          userId:       String(req.user.id),
-          originalName: originalName,
-          fileUrl:      cloudUrl,       // permanent Cloudinary CDN URL
-          fileSize:     fileSize,
-          mimeType:     fileType,
+          userId:             String(req.user.id),
+          originalName:       originalName,
+          fileUrl:            cloudUrl,       // permanent Cloudinary CDN URL
+          fileSize:           fileSize,
+          fileType:           fileType,
+          extractedText:      extractedText || null,
+          parsedSuccessfully: extractedText.trim().length > 50,
         },
       }),
     ]);

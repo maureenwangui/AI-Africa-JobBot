@@ -1,6 +1,9 @@
 // routes/webhooks.js — M-Pesa + Paystack Webhook Handlers
-// Fixed: all field names now use Prisma camelCase (txRef, userId, billingCycle, startDate, endDate)
-// Fixed: all enum values now use Prisma uppercase (ACTIVE, FAILED, FREE, STARTER, GROWTH, PRO)
+//
+// Payment attempts live on the `Payment` model (checkoutRequestId /
+// transactionRef, provider, status). The user's plan lives on the
+// `Subscription` model (one row per user — userId is unique). A successful
+// payment marks the Payment SUCCESS, then activates the linked Subscription.
 
 const express = require('express');
 const crypto  = require('crypto');
@@ -8,81 +11,37 @@ const prisma  = require('../confiq/prisma');
 
 const router = express.Router();
 
-// ─── Billing months map ───────────────────────────────────────────────────────
-const BILLING_MONTHS = {
-  MONTHLY:       1,
-  THREE_MONTHS:  3,
-  SIX_MONTHS:    6,
-  ANNUAL:        12,
-  // also handle lowercase strings from older records
-  monthly:       1,
-  '3mo':         3,
-  '6mo':         6,
-};
-
-// ─── Plan map — normalize to Prisma uppercase enum ───────────────────────────
-const normalizePlan = (plan) => {
-  if (!plan) return 'FREE';
-  const map = {
-    free:         'FREE',
-    starter:      'STARTER',
-    growth:       'GROWTH',
-    pro:          'PRO',
-    FREE:         'FREE',
-    STARTER:      'STARTER',
-    GROWTH:       'GROWTH',
-    PRO:          'PRO',
-    PROFESSIONAL: 'PRO',
-  };
-  return map[plan] || 'FREE';
-};
+// ─── Billing cycle → months map — matches the values sent by the frontend/
+//     routes/subscription.js ('monthly' | '3mo' | '6mo') ────────────────────
+const BILLING_MONTHS = { monthly: 1, '3mo': 3, '6mo': 6 };
 
 // ─── activateSubscription ─────────────────────────────────────────────────────
-// Fixed field names:
-//   sub.billing_cycle → sub.billingCycle
-//   sub.user_id       → sub.userId
-//   sub.plan          → normalized to Prisma uppercase
-//   start_date        → startDate
-//   end_date          → endDate
-//   subscription_status → subscriptionStatus
-//   updated_at        → updatedAt (handled by Prisma @updatedAt automatically)
-// Fixed enum values:
-//   'active' → 'ACTIVE'
-
+// `sub` here is the linked Subscription row (payment.subscriptionId).
 async function activateSubscription(sub) {
   const months  = BILLING_MONTHS[sub.billingCycle] || 1;
   const endDate = new Date();
   endDate.setMonth(endDate.getMonth() + months);
 
-  const planEnum = normalizePlan(sub.plan);
-
   // Wrapped in a transaction — both updates succeed or both fail
   await prisma.$transaction([
-
-    // Fixed: status: 'active' → status: 'ACTIVE'
-    // Fixed: start_date → startDate, end_date → endDate
     prisma.subscription.update({
       where: { id: sub.id },
       data: {
         status:    'ACTIVE',
         startDate: new Date(),
-        endDate:   endDate,
+        endDate,
       },
     }),
-
-    // Fixed: sub.user_id → sub.userId
-    // Fixed: subscription_status: 'active' → subscriptionStatus: 'ACTIVE'
-    // Fixed: plan: sub.plan → plan: planEnum (uppercase Prisma enum)
     prisma.user.update({
       where: { id: sub.userId },
       data: {
-        plan:               planEnum,
+        plan:               sub.plan,
         subscriptionStatus: 'ACTIVE',
       },
     }),
   ]);
 
-  console.log(`✅ Subscription activated: user ${sub.userId}, plan ${planEnum}`);
+  console.log(`✅ Subscription activated: user ${sub.userId}, plan ${sub.plan}`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -102,13 +61,12 @@ router.post('/mpesa', express.json(), (req, res) => {
       const { CheckoutRequestID, ResultCode, ResultDesc } = callback;
       console.log(`📱 M-Pesa callback: ${CheckoutRequestID} → ResultCode ${ResultCode}`);
 
-      // Fixed: checkout_request_id → checkoutRequestId (Prisma camelCase)
-      const sub = await prisma.subscription.findFirst({
+      const payment = await prisma.payment.findFirst({
         where: { checkoutRequestId: CheckoutRequestID },
       });
 
-      if (!sub) {
-        return console.warn('⚠️ No subscription found for CheckoutRequestID:', CheckoutRequestID);
+      if (!payment) {
+        return console.warn('⚠️ No payment found for CheckoutRequestID:', CheckoutRequestID);
       }
 
       if (ResultCode === 0) {
@@ -118,24 +76,28 @@ router.post('/mpesa', express.json(), (req, res) => {
         const mpesaRef = items.find(i => i.Name === 'MpesaReceiptNumber')?.Value;
         const phone    = items.find(i => i.Name === 'PhoneNumber')?.Value;
 
-        // Fixed: mpesa_receipt → mpesaReceipt, amount_paid → amountPaid
-        await prisma.subscription.update({
-          where: { id: sub.id },
+        await prisma.payment.update({
+          where: { id: payment.id },
           data: {
-            mpesaReceipt: mpesaRef ?? null,
-            amountPaid:   amount   ? Number(amount) : null,
+            status:        'SUCCESS',
+            receiptNumber: mpesaRef ? String(mpesaRef) : null,
+            amount:        amount ? Number(amount) : payment.amount,
+            paymentDate:   new Date(),
           },
         });
 
-        await activateSubscription(sub);
+        if (payment.subscriptionId) {
+          const sub = await prisma.subscription.findUnique({ where: { id: payment.subscriptionId } });
+          if (sub) await activateSubscription(sub);
+        }
+
         console.log(`💰 M-Pesa payment: KES ${amount} | Receipt: ${mpesaRef} | Phone: ${phone}`);
 
       } else {
         // Payment failed or cancelled
-        // Fixed: status: 'failed' → status: 'CANCELLED' (Prisma enum)
-        await prisma.subscription.update({
-          where: { id: sub.id },
-          data:  { status: 'CANCELLED' },
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data:  { status: 'FAILED' },
         });
         console.log(`❌ M-Pesa payment failed: ${ResultDesc}`);
       }
@@ -180,31 +142,32 @@ router.post('/paystack', express.json(), (req, res) => {
         if (event === 'charge.success') {
           const reference = data.reference;
 
-          // Fixed: tx_ref → txRef (Prisma camelCase)
-          const sub = await prisma.subscription.findFirst({
-            where: { txRef: reference },
+          const payment = await prisma.payment.findFirst({
+            where: { transactionRef: reference },
           });
 
-          if (!sub) {
-            return console.warn('⚠️ No subscription found for reference:', reference);
+          if (!payment) {
+            return console.warn('⚠️ No payment found for reference:', reference);
           }
 
-          // Fixed: sub.status === 'active' → sub.status === 'ACTIVE'
-          if (sub.status === 'ACTIVE') {
-            return console.log('ℹ️ Subscription already active — skipping');
+          if (payment.status === 'SUCCESS') {
+            return console.log('ℹ️ Payment already processed — skipping');
           }
 
-          // Fixed: flw_transaction_id → paystackTransactionId
-          // Fixed: amount_paid → amountPaid
-          await prisma.subscription.update({
-            where: { id: sub.id },
+          await prisma.payment.update({
+            where: { id: payment.id },
             data: {
-              paystackTransactionId: String(data.id),
-              amountPaid:            data.amount / 100,
+              status:      'SUCCESS',
+              amount:      data.amount / 100,
+              paymentDate: new Date(),
             },
           });
 
-          await activateSubscription(sub);
+          if (payment.subscriptionId) {
+            const sub = await prisma.subscription.findUnique({ where: { id: payment.subscriptionId } });
+            if (sub && sub.status !== 'ACTIVE') await activateSubscription(sub);
+          }
+
           console.log(`💰 Paystack payment: ${data.currency} ${data.amount / 100} from ${data.customer?.email}`);
         }
 

@@ -1,18 +1,28 @@
 // routes/subscription.js — M-Pesa + Paystack Payment Integration
+//
+// Data model note: `Subscription` (one row per user — userId is @unique)
+// represents the user's current plan. `Payment` represents one individual
+// transaction/attempt (provider, checkoutRequestId/transactionRef, status).
+// Every "initiate" call below upserts the Subscription (so retrying a
+// checkout never violates the unique userId constraint) and creates a new
+// Payment row for that specific attempt.
 const express = require('express');
 const axios   = require('axios');
-const { PrismaClient } = require('@prisma/client');
 const { auth } = require('../middleware/auth');
+const prisma  = require('../confiq/prisma');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // ─── Plan Config ──────────────────────────────────────────────────────────────
+// Public-facing plan slugs (used by the frontend & this API) map onto the
+// Prisma SubscriptionPlan enum (FREE | STARTER | PROFESSIONAL | BUSINESS).
 const PLANS = {
   starter: { name: 'Starter', usd: 4,  kes: 500,  applications: 20,  cv: 5,  cover_letters: 20  },
   growth:  { name: 'Growth',  usd: 9,  kes: 1200, applications: 80,  cv: 20, cover_letters: 80  },
   pro:     { name: 'Pro',     usd: 19, kes: 2500, applications: 200, cv: 50, cover_letters: 200 },
 };
+
+const PLAN_TO_ENUM = { starter: 'STARTER', growth: 'PROFESSIONAL', pro: 'BUSINESS' };
 
 const BILLING_MULTIPLIER = { monthly: 1, '3mo': 3, '6mo': 6 };
 
@@ -27,6 +37,27 @@ function getPlanAmount(plan, billing_cycle, currency = 'KES') {
   if (!kes) return null;
   if (currency === 'KES') return kes;
   return Math.round((kes / 130) * 100) / 100;
+}
+
+// Create/refresh the user's Subscription row as PENDING for the plan they're
+// about to pay for. Safe to call repeatedly (upsert on the unique userId).
+async function upsertPendingSubscription(userId, plan, billing_cycle) {
+  return prisma.subscription.upsert({
+    where:  { userId },
+    update: {
+      plan:              PLAN_TO_ENUM[plan],
+      status:            'PENDING',
+      billingCycle:      billing_cycle,
+      applicationsLimit: PLANS[plan].applications,
+    },
+    create: {
+      userId,
+      plan:              PLAN_TO_ENUM[plan],
+      status:            'PENDING',
+      billingCycle:      billing_cycle,
+      applicationsLimit: PLANS[plan].applications,
+    },
+  });
 }
 
 // ── GET /api/subscription/test-config ────────────────────────────────────────
@@ -66,14 +97,12 @@ router.get('/status', auth, async (req, res) => {
   try {
     const month = new Date().toISOString().slice(0, 7);
 
-    // Run both lookups in parallel
     const [sub, usage] = await Promise.all([
-      prisma.subscription.findFirst({
-        where:   { user_id: req.user.id },
-        orderBy: { created_at: 'desc' },
+      prisma.subscription.findUnique({
+        where: { userId: req.user.id },
       }),
-      prisma.usageLimit.findFirst({
-        where: { user_id: req.user.id, month },
+      prisma.usage.findFirst({
+        where: { userId: req.user.id, month },
       }),
     ]);
 
@@ -143,16 +172,18 @@ router.post('/mpesa/initiate', auth, async (req, res) => {
       return res.status(400).json({ error: data.ResponseDescription || 'M-Pesa request failed' });
     }
 
-    await prisma.subscription.create({
+    const sub = await upsertPendingSubscription(req.user.id, plan, billing_cycle);
+
+    await prisma.payment.create({
       data: {
-        user_id:             req.user.id,
-        plan,
-        billing_cycle,
-        provider:            'mpesa',
-        status:              'pending',
+        userId:            req.user.id,
+        subscriptionId:    sub.id,
+        provider:          'MPESA',
+        status:            'PENDING',
         amount,
-        currency:            'KES',
-        checkout_request_id: data.CheckoutRequestID,
+        currency:          'KES',
+        checkoutRequestId: data.CheckoutRequestID,
+        phoneNumber:       formattedPhone,
       },
     });
 
@@ -179,12 +210,12 @@ router.post('/mpesa/check', auth, async (req, res) => {
   try {
     const { checkout_request_id } = req.body;
 
-    const sub = await prisma.subscription.findFirst({
-      where: { checkout_request_id, user_id: req.user.id },
+    const payment = await prisma.payment.findFirst({
+      where: { checkoutRequestId: checkout_request_id, userId: req.user.id },
     });
 
-    if (!sub) return res.status(404).json({ error: 'Payment not found' });
-    res.json({ status: sub.status, plan: sub.plan });
+    if (!payment) return res.status(404).json({ error: 'Payment not found' });
+    res.json({ status: payment.status, plan: req.user.plan });
   } catch (err) {
     res.status(500).json({ error: 'Status check failed' });
   }
@@ -224,7 +255,7 @@ router.post('/paystack/initiate', auth, async (req, res) => {
         amount:       amount * 100,
         currency,
         reference:    txRef,
-        callback_url: `${process.env.FRONTEND_URL || 'http://localhost:5500'}/payment-success.html`,
+        callback_url: `${process.env.FRONTEND_URL || 'http://localhost:5500'}/`,
         metadata: {
           user_id:       req.user.id,
           plan,
@@ -248,16 +279,17 @@ router.post('/paystack/initiate', auth, async (req, res) => {
       return res.status(400).json({ error: data.message || 'Paystack request failed' });
     }
 
-    await prisma.subscription.create({
+    const sub = await upsertPendingSubscription(req.user.id, plan, billing_cycle);
+
+    await prisma.payment.create({
       data: {
-        user_id:      req.user.id,
-        plan,
-        billing_cycle,
-        provider:     'paystack',
-        status:       'pending',
+        userId:         req.user.id,
+        subscriptionId: sub.id,
+        provider:       'PAYSTACK',
+        status:         'PENDING',
         amount,
         currency,
-        tx_ref:       txRef,
+        transactionRef: txRef,
       },
     });
 
@@ -301,46 +333,51 @@ router.post('/paystack/verify', auth, async (req, res) => {
       return res.status(400).json({ error: 'Payment not successful', status: tx?.status });
     }
 
-    const sub = await prisma.subscription.findFirst({
-      where: { tx_ref: ref, user_id: req.user.id },
+    const payment = await prisma.payment.findFirst({
+      where: { transactionRef: ref, userId: req.user.id },
     });
-    if (!sub) return res.status(404).json({ error: 'Subscription record not found' });
+    if (!payment) return res.status(404).json({ error: 'Payment record not found' });
 
     // Prevent double activation
-    if (sub.status === 'active') {
-      return res.json({ status: 'active', plan: sub.plan, message: 'Already activated' });
+    if (payment.status === 'SUCCESS') {
+      const existingSub = await prisma.subscription.findUnique({ where: { userId: req.user.id } });
+      return res.json({ status: 'ACTIVE', plan: existingSub?.plan, message: 'Already activated' });
     }
 
-    const months  = BILLING_MULTIPLIER[sub.billing_cycle] || 1;
+    const sub = await prisma.subscription.findUnique({ where: { userId: req.user.id } });
+    if (!sub) return res.status(404).json({ error: 'Subscription record not found' });
+
+    const months  = BILLING_MULTIPLIER[sub.billingCycle] || 1;
     const endDate = new Date();
     endDate.setMonth(endDate.getMonth() + months);
 
-    // Atomic: update both tables together or neither
+    // Atomic: mark the payment paid, activate the subscription, update the user
     await prisma.$transaction([
+      prisma.payment.update({
+        where: { id: payment.id },
+        data:  { status: 'SUCCESS', paymentDate: new Date() },
+      }),
       prisma.subscription.update({
         where: { id: sub.id },
         data: {
-          status:             'active',
-          start_date:         new Date(),
-          end_date:           endDate,
-          flw_transaction_id: String(tx.id),
-          updated_at:         new Date(),
+          status:    'ACTIVE',
+          startDate: new Date(),
+          endDate,
         },
       }),
       prisma.user.update({
         where: { id: req.user.id },
         data: {
-          plan:                sub.plan,
-          subscription_status: 'active',
-          updated_at:          new Date(),
+          plan:               sub.plan,
+          subscriptionStatus: 'ACTIVE',
         },
       }),
     ]);
 
     res.json({
-      status:  'active',
+      status:  'ACTIVE',
       plan:    sub.plan,
-      message: `${PLANS[sub.plan]?.name || sub.plan} plan activated!`,
+      message: `${sub.plan} plan activated!`,
     });
   } catch (err) {
     console.error('Paystack verify error:', err.response?.data || err.message);
@@ -351,21 +388,22 @@ router.post('/paystack/verify', auth, async (req, res) => {
 // POST /api/subscription/cancel
 router.post('/cancel', auth, async (req, res) => {
   try {
-    const sub = await prisma.subscription.findFirst({
-      where:   { user_id: req.user.id, status: 'active' },
-      orderBy: { created_at: 'desc' },
+    const sub = await prisma.subscription.findUnique({
+      where: { userId: req.user.id },
     });
-    if (!sub) return res.status(404).json({ error: 'No active subscription found' });
+    if (!sub || sub.status !== 'ACTIVE') {
+      return res.status(404).json({ error: 'No active subscription found' });
+    }
 
     // Atomic: cancel subscription + update user in one transaction
     await prisma.$transaction([
       prisma.subscription.update({
         where: { id: sub.id },
-        data:  { status: 'cancelled', updated_at: new Date() },
+        data:  { status: 'CANCELLED' },
       }),
       prisma.user.update({
         where: { id: req.user.id },
-        data:  { subscription_status: 'cancelled', updated_at: new Date() },
+        data:  { subscriptionStatus: 'CANCELLED' },
       }),
     ]);
 

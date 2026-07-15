@@ -1,25 +1,26 @@
 // middleware/subscription.js
-const { PrismaClient } = require('@prisma/client');
 
-const prisma = new PrismaClient();
+const prisma = require('../confiq/prisma');
 
 // ─── Plan limits ──────────────────────────────────────────────────────────────
+// Keys must match the SubscriptionPlan enum values exactly (User.plan).
 const PLAN_LIMITS = {
-  free:    { applications: 3,   cv: 1,  cover_letters: 3   },
-  starter: { applications: 20,  cv: 5,  cover_letters: 20  },
-  growth:  { applications: 80,  cv: 20, cover_letters: 80  },
-  pro:     { applications: 200, cv: 50, cover_letters: 200 },
+  FREE:         { applications: 3,   cv: 1,  cover_letters: 3   },
+  STARTER:      { applications: 20,  cv: 5,  cover_letters: 20  },
+  PROFESSIONAL: { applications: 80,  cv: 20, cover_letters: 80  },
+  BUSINESS:     { applications: 200, cv: 50, cover_letters: 200 },
 };
 
 // ─── Get or create usage record for current month ────────────────────────────
-// NOTE: requires @@unique([user_id, month]) on UsageLimit in your Prisma schema
-// so the upsert where clause is atomic and race-condition safe.
+// Uses the `Usage` model and its @@unique([userId, month]) constraint
+// (Prisma compound-key name: userId_month), so the upsert is atomic and
+// race-condition safe.
 async function getOrCreateUsage(prismaClient, userId) {
   const month = new Date().toISOString().slice(0, 7); // YYYY-MM
-  return prismaClient.usageLimit.upsert({
-    where:  { user_id_month: { user_id: userId, month } },
+  return prismaClient.usage.upsert({
+    where:  { userId_month: { userId, month } },
     update: {},
-    create: { user_id: userId, month, applications_used: 0, cv_used: 0, cover_letters_used: 0 },
+    create: { userId, month, applicationsUsed: 0, resumesOptimized: 0, coverLettersGenerated: 0 },
   });
 }
 
@@ -29,12 +30,12 @@ const checkSubscription = async (req, res, next) => {
     const user = req.user;
 
     // Free plan users allowed (with limits)
-    if (user.plan === 'free') return next();
+    if (user.plan === 'FREE') return next();
 
     // Check active subscription
     const sub = await prisma.subscription.findFirst({
-      where:   { user_id: user.id, status: 'active' },
-      orderBy: { created_at: 'desc' },
+      where:   { userId: user.id, status: 'ACTIVE' },
+      orderBy: { createdAt: 'desc' },
     });
 
     if (!sub) {
@@ -45,15 +46,15 @@ const checkSubscription = async (req, res, next) => {
     }
 
     // Check expiry — mark both tables atomically if expired
-    if (sub.end_date && new Date(sub.end_date) < new Date()) {
+    if (sub.endDate && new Date(sub.endDate) < new Date()) {
       await prisma.$transaction([
         prisma.subscription.update({
           where: { id: sub.id },
-          data:  { status: 'expired' },
+          data:  { status: 'EXPIRED' },
         }),
         prisma.user.update({
           where: { id: user.id },
-          data:  { subscription_status: 'inactive' },
+          data:  { subscriptionStatus: 'EXPIRED' },
         }),
       ]);
       return res.status(403).json({
@@ -73,14 +74,14 @@ const checkSubscription = async (req, res, next) => {
 // ─── Check usage limits before AI actions ────────────────────────────────────
 const usageLimitMiddleware = (action) => async (req, res, next) => {
   try {
-    const plan   = req.user.plan || 'free';
-    const limits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
+    const plan   = req.user.plan || 'FREE';
+    const limits = PLAN_LIMITS[plan] || PLAN_LIMITS.FREE;
     const usage  = await getOrCreateUsage(prisma, req.user.id);
 
     const limitMap = {
-      applications:  { used: usage.applications_used,  limit: limits.applications  },
-      cv:            { used: usage.cv_used,             limit: limits.cv            },
-      cover_letters: { used: usage.cover_letters_used,  limit: limits.cover_letters },
+      applications:  { used: usage.applicationsUsed,       limit: limits.applications  },
+      cv:            { used: usage.resumesOptimized,       limit: limits.cv            },
+      cover_letters: { used: usage.coverLettersGenerated,  limit: limits.cover_letters },
     };
 
     const check = limitMap[action];
@@ -110,16 +111,16 @@ const usageLimitMiddleware = (action) => async (req, res, next) => {
 async function deductUsage(userId, action) {
   const month  = new Date().toISOString().slice(0, 7);
   const colMap = {
-    applications:  'applications_used',
-    cv:            'cv_used',
-    cover_letters: 'cover_letters_used',
+    applications:  'applicationsUsed',
+    cv:            'resumesOptimized',
+    cover_letters: 'coverLettersGenerated',
   };
   const col = colMap[action];
   if (!col) return;
 
-  await prisma.usageLimit.updateMany({
-    where: { user_id: userId, month },
-    data:  { [col]: { increment: 1 }, updated_at: new Date() },
+  await prisma.usage.updateMany({
+    where: { userId, month },
+    data:  { [col]: { increment: 1 }, updatedAt: new Date() },
   });
 }
 

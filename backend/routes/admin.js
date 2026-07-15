@@ -1,4 +1,4 @@
-// routes/admin.js — Fixed enum values, ID types, and date formatting
+// routes/admin.js
 const express = require('express');
 const prisma   = require('../confiq/prisma');
 const { adminAuth } = require('../middleware/auth');
@@ -7,6 +7,9 @@ const router = express.Router();
 
 // helper — format date safely
 const fmt = (d) => d ? new Date(d).toISOString() : null;
+
+// Public-facing plan slugs <-> Prisma SubscriptionPlan enum
+const PLAN_SLUG_TO_ENUM = { free: 'FREE', starter: 'STARTER', growth: 'PROFESSIONAL', pro: 'BUSINESS' };
 
 // ── GET /api/admin/stats ──────────────────────────────────────────────────────
 router.get('/stats', adminAuth, async (req, res) => {
@@ -31,13 +34,13 @@ router.get('/stats', adminAuth, async (req, res) => {
       prisma.user.count(),
       prisma.user.count({ where: { subscriptionStatus: 'ACTIVE' } }),
       prisma.application.count(),
-      prisma.job.count({ where: { isActive: true } }),
+      prisma.job.count({ where: { status: 'ACTIVE' } }),
       prisma.job.count(),
       prisma.subscription.count({ where: { status: 'ACTIVE' } }),
       prisma.user.count({ where: { plan: 'FREE' } }),
       prisma.user.count({ where: { plan: 'STARTER' } }),
-      prisma.user.count({ where: { plan: 'GROWTH' } }),
-      prisma.user.count({ where: { plan: 'PRO' } }),
+      prisma.user.count({ where: { plan: 'PROFESSIONAL' } }),
+      prisma.user.count({ where: { plan: 'BUSINESS' } }),
       prisma.application.count({ where: { createdAt: { gte: today } } }),
       prisma.user.count({ where: { createdAt: { gte: today } } }),
     ]);
@@ -73,8 +76,8 @@ router.get('/users', adminAuth, async (req, res) => {
   try {
     const users = await prisma.user.findMany({
       include: {
-        profile:      true,
-        // Get latest resume for cv_filename display in admin
+        profile: true,
+        // Latest resume for cv_filename display in admin
         resumes: {
           orderBy: { createdAt: 'desc' },
           take: 1,
@@ -99,7 +102,6 @@ router.get('/users', adminAuth, async (req, res) => {
       role:                u.role.toLowerCase(),
       created_at:          fmt(u.createdAt),
       app_count:           u.applications.length,
-      // Fix: read from resumes table (Cloudinary URL) not profile.cvFilename
       cv_filename:         u.resumes?.[0]?.originalName || null,
       cv_url:              u.resumes?.[0]?.fileUrl      || null,
       skills:              u.profile?.skills            || null,
@@ -120,7 +122,7 @@ router.get('/applications', adminAuth, async (req, res) => {
     const apps = await prisma.application.findMany({
       include: {
         user: { select: { id: true, email: true, name: true } },
-        job:  { select: { id: true, title: true, company: true, location: true } },
+        job:  { select: { id: true, title: true, location: true, company: { select: { name: true } } } },
       },
       orderBy: { createdAt: 'desc' },
       take: 500,
@@ -136,9 +138,9 @@ router.get('/applications', adminAuth, async (req, res) => {
       applied_at:  fmt(a.appliedAt),
       email:       a.user?.email || '',
       name:        a.user?.name  || '',
-      job_title:   a.job?.title    || '',
-      company:     a.job?.company  || '',
-      location:    a.job?.location || '',
+      job_title:   a.job?.title           || '',
+      company:     a.job?.company?.name   || '',
+      location:    a.job?.location        || '',
     }));
 
     res.json(formatted);
@@ -153,7 +155,10 @@ router.get('/applications', adminAuth, async (req, res) => {
 router.get('/jobs', adminAuth, async (req, res) => {
   try {
     const jobs = await prisma.job.findMany({
-      include: { applications: { select: { id: true } } },
+      include: {
+        company: { select: { name: true } },
+        applications: { select: { id: true } },
+      },
       orderBy: { createdAt: 'desc' },
       take: 500,
     });
@@ -161,13 +166,13 @@ router.get('/jobs', adminAuth, async (req, res) => {
     const formatted = jobs.map(j => ({
       id:                j.id,
       title:             j.title,
-      company:           j.company,
+      company:           j.company?.name || '',
       location:          j.location,
-      remote:            j.remote ? 1 : 0,
-      salary:            j.salary,
-      is_active:         j.isActive ? 1 : 0,
+      remote:            j.remoteType === 'REMOTE' ? 1 : 0,
+      salary_min:        j.salaryMin,
+      salary_max:        j.salaryMax,
+      is_active:         j.status === 'ACTIVE' ? 1 : 0,
       source:            j.source,
-      apply_email:       j.applyEmail,
       apply_url:         j.applyUrl,
       created_at:        fmt(j.createdAt),
       application_count: j.applications.length,
@@ -187,24 +192,28 @@ router.get('/subscriptions', adminAuth, async (req, res) => {
     const subs = await prisma.subscription.findMany({
       include: {
         user: { select: { email: true, name: true } },
+        payments: { orderBy: { createdAt: 'desc' }, take: 1 },
       },
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
 
-    const formatted = subs.map(s => ({
-      id:            s.id,
-      user_id:       s.userId,
-      plan:          s.plan.toLowerCase(),
-      billing_cycle: s.billingCycle?.toLowerCase() || 'monthly',
-      provider:      s.provider?.toLowerCase()     || '',
-      status:        s.status.toLowerCase(),
-      amount:        s.amount,
-      currency:      s.currency,
-      created_at:    fmt(s.createdAt),
-      email:         s.user?.email || '',
-      name:          s.user?.name  || '',
-    }));
+    const formatted = subs.map(s => {
+      const latestPayment = s.payments?.[0];
+      return {
+        id:            s.id,
+        user_id:       s.userId,
+        plan:          s.plan.toLowerCase(),
+        billing_cycle: s.billingCycle?.toLowerCase() || 'monthly',
+        provider:      latestPayment?.provider?.toLowerCase() || '',
+        status:        s.status.toLowerCase(),
+        amount:        latestPayment?.amount   ?? null,
+        currency:      latestPayment?.currency ?? 'KES',
+        created_at:    fmt(s.createdAt),
+        email:         s.user?.email || '',
+        name:          s.user?.name  || '',
+      };
+    });
 
     res.json(formatted);
 
@@ -218,18 +227,20 @@ router.get('/subscriptions', adminAuth, async (req, res) => {
 router.patch('/jobs/:id/toggle', adminAuth, async (req, res) => {
   try {
     const job = await prisma.job.findUnique({
-      where: { id: String(req.params.id) },
+      where: { id: req.params.id },
     });
     if (!job) return res.status(404).json({ error: 'Job not found' });
 
+    const newStatus = job.status === 'ACTIVE' ? 'CLOSED' : 'ACTIVE';
+
     const updated = await prisma.job.update({
-      where: { id: String(req.params.id) },
-      data:  { isActive: !job.isActive },
+      where: { id: req.params.id },
+      data:  { status: newStatus },
     });
 
     res.json({
-      message:   updated.isActive ? 'Job activated' : 'Job deactivated',
-      is_active: updated.isActive ? 1 : 0,
+      message:   updated.status === 'ACTIVE' ? 'Job activated' : 'Job deactivated',
+      is_active: updated.status === 'ACTIVE' ? 1 : 0,
     });
 
   } catch (err) {
@@ -241,7 +252,7 @@ router.patch('/jobs/:id/toggle', adminAuth, async (req, res) => {
 // ── DELETE /api/admin/jobs/:id ────────────────────────────────────────────────
 router.delete('/jobs/:id', adminAuth, async (req, res) => {
   try {
-    await prisma.job.delete({ where: { id: String(req.params.id) } });
+    await prisma.job.delete({ where: { id: req.params.id } });
     res.json({ message: 'Job deleted' });
   } catch (err) {
     console.error('Delete job error:', err.message);
@@ -253,17 +264,16 @@ router.delete('/jobs/:id', adminAuth, async (req, res) => {
 router.patch('/users/:id/plan', adminAuth, async (req, res) => {
   try {
     const { plan } = req.body;
-    const validPlans = ['FREE', 'STARTER', 'GROWTH', 'PRO'];
-    const planUpper  = plan?.toUpperCase();
-    if (!validPlans.includes(planUpper)) {
-      return res.status(400).json({ error: 'Invalid plan' });
+    const planEnum = PLAN_SLUG_TO_ENUM[String(plan).toLowerCase()];
+    if (!planEnum) {
+      return res.status(400).json({ error: 'Invalid plan. Choose: free, starter, growth, or pro' });
     }
 
     await prisma.user.update({
-      where: { id: String(req.params.id) },
+      where: { id: req.params.id },
       data: {
-        plan:               planUpper,
-        subscriptionStatus: planUpper === 'FREE' ? 'PENDING' : 'ACTIVE',
+        plan:               planEnum,
+        subscriptionStatus: planEnum === 'FREE' ? 'PENDING' : 'ACTIVE',
       },
     });
 
@@ -279,29 +289,36 @@ router.patch('/users/:id/plan', adminAuth, async (req, res) => {
 router.post('/jobs', adminAuth, async (req, res) => {
   try {
     const {
-      title, company, location, remote,
-      description, requirements, salary,
-      job_url, apply_email, apply_url, source,
+      title, company, location,
+      remote_type = 'ONSITE', employment_type = 'FULL_TIME',
+      description, requirements, salary_min, salary_max,
+      apply_url, source,
     } = req.body;
 
     if (!title || !company) {
       return res.status(400).json({ error: 'Title and company are required' });
     }
 
+    const companyRecord = await prisma.company.upsert({
+      where:  { name: company },
+      update: {},
+      create: { name: company },
+    });
+
     const job = await prisma.job.create({
       data: {
         title,
-        company,
-        location:     location     || '',
-        remote:       !!remote,
-        description:  description  || '',
-        requirements: requirements || '',
-        salary:       salary       || '',
-        jobUrl:       job_url      || '',
-        applyEmail:   apply_email  || '',
-        applyUrl:     apply_url    || '',
-        source:       source       || 'admin',
-        isActive:     true,
+        companyId:       companyRecord.id,
+        location:        location     || '',
+        remoteType:      remote_type,
+        employmentType:  employment_type,
+        description:     description  || '',
+        requirements:    requirements || '',
+        salaryMin:       salary_min ? Number(salary_min) : null,
+        salaryMax:       salary_max ? Number(salary_max) : null,
+        applyUrl:        apply_url    || '',
+        source:          source       || 'admin',
+        status:          'ACTIVE',
       },
     });
 
@@ -318,59 +335,29 @@ router.post('/jobs', adminAuth, async (req, res) => {
 router.get('/resumes', adminAuth, async (req, res) => {
   try {
     const BACKEND_URL = process.env.BACKEND_URL || 'https://ai-africa-jobbot.onrender.com';
-    let resumes = [];
 
-    try {
-      // Primary: use Prisma resume model
-      const rows = await prisma.resume.findMany({
-        include: {
-          user: { select: { id: true, email: true, name: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 500,
-      });
+    const rows = await prisma.resume.findMany({
+      include: {
+        user: { select: { id: true, email: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    });
 
-      resumes = rows.map(r => ({
-        id:         r.id,
-        user_id:    r.userId,
-        name:       r.user?.name  || '—',
-        email:      r.user?.email || '—',
-        file_name:  r.originalName,
-        // Use absolute Render URL so Netlify frontend downloads correctly
-        file_url:   r.fileUrl
-          ? (r.fileUrl.startsWith('http') ? r.fileUrl : `${BACKEND_URL}${r.fileUrl}`)
-          : `${BACKEND_URL}/uploads/cvs/user_${r.userId}/${r.originalName}`,
-        file_size:  r.fileSize,
-        mime_type:  r.mimeType,
-        created_at: fmt(r.createdAt),
-      }));
-
-    } catch (prismaErr) {
-      // Fallback: read cvFilename from profiles table
-      console.warn('Resume model query failed, falling back to profiles:', prismaErr.message);
-
-      const profiles = await prisma.profile.findMany({
-        where:   { cvFilename: { not: null } },
-        include: {
-          user: { select: { id: true, email: true, name: true } },
-        },
-        orderBy: { updatedAt: 'desc' },
-        take: 500,
-      });
-
-      resumes = profiles
-        .filter(p => p.cvFilename)
-        .map(p => ({
-          id:         p.id,
-          user_id:    p.userId,
-          name:       p.user?.name  || '—',
-          email:      p.user?.email || '—',
-          file_name:  p.cvFilename,
-          // Fixed: absolute Render URL including user subfolder
-          file_url:   `${BACKEND_URL}/uploads/cvs/user_${p.userId}/${p.cvFilename}`,
-          created_at: fmt(p.updatedAt),
-        }));
-    }
+    const resumes = rows.map(r => ({
+      id:         r.id,
+      user_id:    r.userId,
+      name:       r.user?.name  || '—',
+      email:      r.user?.email || '—',
+      file_name:  r.originalName,
+      // Use absolute Render URL so the Netlify frontend downloads correctly
+      file_url:   r.fileUrl
+        ? (r.fileUrl.startsWith('http') ? r.fileUrl : `${BACKEND_URL}${r.fileUrl}`)
+        : `${BACKEND_URL}/uploads/cvs/user_${r.userId}/${r.originalName}`,
+      file_size:  r.fileSize,
+      mime_type:  r.fileType,
+      created_at: fmt(r.createdAt),
+    }));
 
     res.json(resumes);
 

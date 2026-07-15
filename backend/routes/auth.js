@@ -158,7 +158,7 @@ router.post('/forgot-password', async (req, res) => {
       },
     });
 
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+    const resetUrl = `${process.env.FRONTEND_URL}/?reset_token=${resetToken}`;
     emailService.sendPasswordReset(user.email, user.name, resetUrl).catch(console.error);
 
     res.json({ message: 'If that email exists, a reset link has been sent.' });

@@ -1,10 +1,23 @@
 const express = require("express");
-const { PrismaClient } = require("@prisma/client");
 const { auth } = require("../middleware/auth");
 const notificationService = require("../services/notificationService");
 
-const prisma = new PrismaClient();
+const prisma = require('../confiq/prisma');
 const router = express.Router();
+
+// Flatten `job.company` (a Company relation) down to its name string so
+// clients get the same simple shape they always have.
+function flattenJob(app) {
+  if (!app.job) return app;
+  return {
+    ...app,
+    job: {
+      title:    app.job.title,
+      location: app.job.location,
+      company:  app.job.company?.name || null,
+    },
+  };
+}
 
 // GET all applications
 router.get("/", auth, async (req, res) => {
@@ -17,8 +30,8 @@ router.get("/", auth, async (req, res) => {
         job: {
           select: {
             title: true,
-            company: true,
             location: true,
+            company: { select: { name: true } },
           },
         },
       },
@@ -28,7 +41,7 @@ router.get("/", auth, async (req, res) => {
       take: 100,
     });
 
-    res.json(apps);
+    res.json(apps.map(flattenJob));
   } catch (err) {
     console.error(err);
     res.status(500).json({
@@ -47,21 +60,21 @@ router.get("/stats", auth, async (req, res) => {
     const sent = await prisma.application.count({
       where: {
         userId: req.user.id,
-        status: "sent",
+        status: "APPLIED",
       },
     });
 
     const viewed = await prisma.application.count({
       where: {
         userId: req.user.id,
-        status: "viewed",
+        status: "VIEWED",
       },
     });
 
     const interview = await prisma.application.count({
       where: {
         userId: req.user.id,
-        status: "interview",
+        status: "INTERVIEW",
       },
     });
 
@@ -93,7 +106,7 @@ router.post("/", auth, async (req, res) => {
     const existing = await prisma.application.findFirst({
       where: {
         userId: req.user.id,
-        jobId: Number(job_id),
+        jobId: job_id,
       },
     });
 
@@ -103,28 +116,51 @@ router.post("/", auth, async (req, res) => {
       });
     }
 
+    const job = await prisma.job.findUnique({
+      where: {
+        id: job_id,
+      },
+      include: {
+        company: { select: { name: true } },
+      },
+    });
+
+    if (!job) {
+      return res.status(404).json({
+        error: "Job not found",
+      });
+    }
+
+    // Application.coverLetter is a relation (coverLetterId), not free text —
+    // create a CoverLetter row first if the user supplied text.
+    let coverLetterId = null;
+    if (cover_letter) {
+      const created = await prisma.coverLetter.create({
+        data: {
+          userId:      req.user.id,
+          jobId:       job.id,
+          companyName: job.company?.name || null,
+          content:     cover_letter,
+        },
+      });
+      coverLetterId = created.id;
+    }
+
     const application = await prisma.application.create({
       data: {
         userId: req.user.id,
-        jobId: Number(job_id),
-        status: "sent",
-        coverLetter: cover_letter || "",
+        jobId: job.id,
+        status: "APPLIED",
+        coverLetterId,
         appliedAt: new Date(),
       },
     });
 
-    const job = await prisma.job.findUnique({
-      where: {
-        id: Number(job_id),
-      },
-      select: {
-        title: true,
-        company: true,
-      },
-    });
-
-    if (notificationService?.sendApplicationAlert && job) {
-      await notificationService.sendApplicationAlert(req.user, job);
+    if (notificationService?.sendApplicationAlert) {
+      await notificationService.sendApplicationAlert(req.user, {
+        title: job.title,
+        company: job.company?.name || "the company",
+      });
     }
 
     res.status(201).json({
@@ -145,16 +181,19 @@ router.patch("/:id/status", auth, async (req, res) => {
   try {
     const { status } = req.body;
 
-    const valid = [
-      "queued",
-      "sent",
-      "viewed",
-      "interview",
-      "rejected",
-      "hired",
-    ];
+    // Map the client's friendly lowercase status to the real enum value.
+    const statusMap = {
+      queued:    "QUEUED",
+      sent:      "APPLIED",
+      viewed:    "VIEWED",
+      interview: "INTERVIEW",
+      rejected:  "REJECTED",
+      hired:     "HIRED",
+    };
 
-    if (!valid.includes(status)) {
+    const mapped = statusMap[status];
+
+    if (!mapped) {
       return res.status(400).json({
         error: "Invalid status",
       });
@@ -162,12 +201,13 @@ router.patch("/:id/status", auth, async (req, res) => {
 
     await prisma.application.updateMany({
       where: {
-        id: Number(req.params.id),
+        id: req.params.id,
         userId: req.user.id,
       },
       data: {
-        status,
+        status: mapped,
         updatedAt: new Date(),
+        ...(mapped === "VIEWED" ? { viewedAt: new Date() } : {}),
       },
     });
 

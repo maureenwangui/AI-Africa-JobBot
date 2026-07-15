@@ -1,10 +1,9 @@
 // routes/dashboard.js
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
 const { auth } = require('../middleware/auth');
 const { PLAN_LIMITS } = require('../middleware/subscription');
 
-const prisma = new PrismaClient();
+const prisma = require('../confiq/prisma');
 const router = express.Router();
 
 // The database stores plans as Prisma enums while the existing frontend uses
@@ -58,7 +57,7 @@ router.get('/', auth, async (req, res) => {
     ]);
 
     const limitKey = planLimitKey[req.user.plan] || 'free';
-    const limits = PLAN_LIMITS[limitKey] || PLAN_LIMITS.free;
+    const limits = PLAN_LIMITS[req.user.plan] || PLAN_LIMITS.FREE;
 
     res.json({
       stats: {
