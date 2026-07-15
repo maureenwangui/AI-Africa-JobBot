@@ -8,7 +8,7 @@ const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const prisma     = require('../confiq/prisma');
 const { auth }   = require('../middleware/auth');
 const aiService  = require('../services/aiService');
-
+console.log('Using Cloudinary:', process.env.CLOUDINARY_CLOUD_NAME);
 const router = express.Router();
 
 // ── Cloudinary config ─────────────────────────────────────────────────────────
