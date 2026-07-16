@@ -42,10 +42,6 @@ const upload = multer({
   },
 });
 
-if (!fs.existsSync(filePath)) {
-    throw new Error("Uploaded file missing");
-}
-
 // ── Text extraction helpers ───────────────────────────────────────────────────
 async function extractTextFromFile(filePath, originalName) {
   const ext = path.extname(originalName).toLowerCase();
