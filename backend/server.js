@@ -73,7 +73,7 @@ app.use(express.urlencoded({ extended: true }));
 // ─── Static Files — CV uploads ───────────────────────────────────────────────
 // Serves files from backend/uploads/ at /uploads/...
 // Netlify frontend downloads CVs directly from:
-//   https://ai-africa-jobbot.onrender.com/uploads/cvs/user_USERID/FILENAME.pdf
+
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 

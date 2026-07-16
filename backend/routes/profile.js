@@ -1,45 +1,50 @@
-// routes/profile.js — Prisma + Cloudinary + PDF/DOCX text extraction
+// routes/profile.js — Prisma + Local Upload + PDF/DOCX text extraction
 const express    = require('express');
 const multer     = require('multer');
 const path       = require('path');
 const fs         = require('fs');
-const cloudinary = require('cloudinary').v2;
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const prisma     = require('../confiq/prisma');
 const { auth }   = require('../middleware/auth');
 const aiService  = require('../services/aiService');
-console.log('Using Cloudinary:', process.env.CLOUDINARY_CLOUD_NAME);
 const router = express.Router();
 
-// ── Cloudinary config ─────────────────────────────────────────────────────────
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key:    process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+// ── Multer + storage ───────────────────────────────────────────────
+const uploadDir = path.join(__dirname, "../uploads");
 
-// ── Multer + Cloudinary storage ───────────────────────────────────────────────
-const storage = new CloudinaryStorage({
-  cloudinary,
-  params: async (req, file) => ({
-    folder:        `africa-jobbot/cvs/user_${req.user.id}`,
-    public_id:     `cv_${req.user.id}_${Date.now()}`,
-    resource_type: 'raw',
-    format:        path.extname(file.originalname).slice(1).toLowerCase(),
-  }),
-});
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
 
+const storage = multer.diskStorage({
+    destination(req, file, cb) {
+        cb(null, uploadDir);
+    },
+
+    filename(req, file, cb) {
+        const ext = path.extname(file.originalname);
+        cb(null, `cv_${req.user.id}_${Date.now()}${ext}`);
+    }
+});
+    
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+  },
   fileFilter: (req, file, cb) => {
     const allowed = ['.pdf', '.doc', '.docx'];
+
     if (!allowed.includes(path.extname(file.originalname).toLowerCase())) {
       return cb(new Error('Only PDF and Word documents allowed'));
     }
+
     cb(null, true);
   },
 });
+
+if (!fs.existsSync(filePath)) {
+    throw new Error("Uploaded file missing");
+}
 
 // ── Text extraction helpers ───────────────────────────────────────────────────
 async function extractTextFromFile(filePath, originalName) {
@@ -160,48 +165,26 @@ router.put('/', auth, async (req, res) => {
 
 // ── POST /api/profile/upload-cv ───────────────────────────────────────────────
 router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
-  // temp local path for text extraction before Cloudinary (multer-storage-cloudinary
-  // uploads directly — we need to download briefly or use memoryStorage for extraction)
-  // Solution: use temp memory buffer approach via multer memoryStorage fallback
+  
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-
-    // Cloudinary URL is in req.file.path after CloudinaryStorage upload
-    const cloudUrl      = req.file.path;
+    
+    const fileUrl = `/uploads/${req.file.filename}`;
+    const filePath = req.file.path;
     const originalName  = req.file.originalname;
     const fileSize      = req.file.size;
-    const fileType      = path.extname(originalName).slice(1).toLowerCase();
+    const fileType      = req.file.mimetype;
 
+    if (!fs.existsSync(filePath)) {
+      throw new Error("Uploaded file missing");
+   }
     // ── Text extraction ───────────────────────────────────────────────────────
-    // Cloudinary storage uploads directly — no local file path available.
-    // We download from Cloudinary temporarily for text extraction.
     let extractedText = '';
-    const tempPath = path.join(__dirname, `../uploads/temp_${req.user.id}_${Date.now()}.${fileType}`);
 
     try {
-      // Create temp dir if needed
-      const tempDir = path.join(__dirname, '../uploads');
-      if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-
-      // Download from Cloudinary to temp file
-      const axios  = require('axios');
-      const writer = fs.createWriteStream(tempPath);
-      const response = await axios({ url: cloudUrl, method: 'GET', responseType: 'stream' });
-      await new Promise((resolve, reject) => {
-        response.data.pipe(writer);
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-      });
-
-      // Extract text from temp file
-      extractedText = await extractTextFromFile(tempPath, originalName);
+      extractedText = await extractTextFromFile(filePath, originalName);
     } catch (e) {
       console.error('Text extraction failed (non-fatal):', e.message);
-    } finally {
-      // Always clean up temp file
-      if (fs.existsSync(tempPath)) {
-        try { fs.unlinkSync(tempPath); } catch {}
-      }
     }
 
     // ── AI skill extraction ───────────────────────────────────────────────────
@@ -252,7 +235,7 @@ router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
         data: {
           userId:             String(req.user.id),
           originalName:       originalName,
-          fileUrl:            cloudUrl,       // permanent Cloudinary CDN URL
+          fileUrl:            fileUrl,
           fileSize:           fileSize,
           fileType:           fileType,
           extractedText:      extractedText || null,
@@ -264,7 +247,7 @@ router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
     res.json({
       message:   'CV uploaded and parsed successfully',
       filename:  originalName,
-      file_url:  cloudUrl,
+      file_url:  fileUrl,
       extracted: {
         skills:     extracted.skills     || [],
         experience: extracted.experience || [],

@@ -345,19 +345,22 @@ router.get('/resumes', adminAuth, async (req, res) => {
     });
 
     const resumes = rows.map(r => ({
-      id:         r.id,
-      user_id:    r.userId,
-      name:       r.user?.name  || '—',
-      email:      r.user?.email || '—',
-      file_name:  r.originalName,
-      // Use absolute Render URL so the Netlify frontend downloads correctly
-      file_url:   r.fileUrl
-        ? (r.fileUrl.startsWith('http') ? r.fileUrl : `${BACKEND_URL}${r.fileUrl}`)
-        : `${BACKEND_URL}/uploads/cvs/user_${r.userId}/${r.originalName}`,
-      file_size:  r.fileSize,
-      mime_type:  r.fileType,
-      created_at: fmt(r.createdAt),
-    }));
+    id: r.id,
+    user_id: r.userId,
+    name: r.user?.name || "—",
+    email: r.user?.email || "—",
+    file_name: r.originalName,
+
+    file_url: r.fileUrl
+      ? (r.fileUrl.startsWith('http')
+        ? r.fileUrl
+        : `${BACKEND_URL}${r.fileUrl}`)
+      : null,
+
+    file_size: r.fileSize,
+    mime_type: r.fileType,
+    created_at: fmt(r.createdAt),
+}));
 
     res.json(resumes);
 
