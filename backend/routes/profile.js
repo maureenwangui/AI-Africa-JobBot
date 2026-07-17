@@ -6,6 +6,7 @@ const fs         = require('fs');
 const prisma     = require('../confiq/prisma');
 const { auth }   = require('../middleware/auth');
 const aiService  = require('../services/aiService');
+const cvParser = require('../services/cvParser');
 const router = express.Router();
 
 // ── Multer + storage ───────────────────────────────────────────────
@@ -174,33 +175,75 @@ router.post('/upload-cv', auth, upload.single('cv'), async (req, res) => {
     if (!fs.existsSync(filePath)) {
       throw new Error("Uploaded file missing");
    }
+   
     // ── Text extraction ───────────────────────────────────────────────────────
     let extractedText = '';
 
     try {
       extractedText = await extractTextFromFile(filePath, originalName);
+
+      console.log("========== CV TEXT ==========");
+      console.log("Length:", extractedText.length);
+      console.log(extractedText.substring(0, 500));
+      console.log("=============================");
+
     } catch (e) {
       console.error('Text extraction failed (non-fatal):', e.message);
     }
-
+    
     // ── AI skill extraction ───────────────────────────────────────────────────
-    let extracted = { skills: [], experience: [], education: [], keywords: [], summary: '' };
+    // ── AI + Offline CV Extraction ─────────────────────────────────────────────
+let extracted = {
+  skills: [],
+  experience: [],
+  education: [],
+  keywords: [],
+  summary: ""
+};
 
-    if (extractedText && extractedText.trim().length > 50) {
-      // Have real text — use AI
-      try {
-        extracted = await aiService.extractCvData(extractedText);
-        console.log(`✅ AI extracted ${extracted.skills?.length || 0} skills from CV`);
-      } catch (e) {
-        console.error('AI extraction failed (non-fatal):', e.message);
-        // Fallback to keyword matching if AI fails
-        extracted.skills = extractSkillsByKeyword(extractedText);
-      }
+if (extractedText && extractedText.trim().length > 50) {
+
+  try {
+
+    console.log("Trying AI parser...");
+
+    extracted = await aiService.extractCvData(extractedText);
+
+    // If AI returned little or nothing, use offline parser
+    if (
+      !extracted.skills?.length &&
+      !extracted.experience?.length &&
+      !extracted.education?.length
+    ) {
+
+      console.log("⚠️ AI returned empty data. Switching to offline parser...");
+
+      extracted = cvParser.parseCV(extractedText);
+
     } else {
-      // No text extracted (scanned PDF etc.) — use keyword fallback
-      console.warn('⚠️ No text extracted from CV — using keyword fallback');
-      extracted.skills = [];
+
+      console.log("✅ AI parser succeeded.");
+
     }
+
+  } catch (err) {
+
+    console.log("⚠️ AI unavailable. Using offline parser...");
+
+    extracted = cvParser.parseCV(extractedText);
+
+  }
+
+} else {
+
+  console.log("⚠️ No text extracted.");
+
+}
+
+    // 👇 ADD IT HERE
+    console.log("Skills to save:", extracted.skills);
+    console.log("Experience to save:", extracted.experience);
+    console.log("Education to save:", extracted.education);
 
     // ── Save to database ──────────────────────────────────────────────────────
     // Profile has no dedicated `keywords` column — merge extracted keywords

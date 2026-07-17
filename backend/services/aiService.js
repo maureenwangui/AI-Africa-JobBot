@@ -6,8 +6,11 @@ const axios = require('axios');
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 
 async function callClaude(prompt, systemPrompt = '') {
+  console.log("ANTHROPIC_API_KEY loaded:", !!process.env.ANTHROPIC_API_KEY);
+  console.log("Using model: claude-sonnet-4-6");
+
   const res = await axios.post(ANTHROPIC_API, {
-    model:      'claude-sonnet-4-6',
+    model:      'claude-sonnet-5',
     max_tokens: 1500,
     system:     systemPrompt,
     messages:   [{ role: 'user', content: prompt }],
@@ -46,32 +49,53 @@ Return this exact JSON structure:
   "education": [{"degree": "Degree Name", "institution": "School Name", "year": "2015"}],
   "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"]
 }`;
+try {
+  console.log("CV text length:", cvText.length);
+  console.log("Sending CV to Claude...");
 
-  try {
-    const response = await callClaude(prompt, 'You are a CV parser. Extract information from the CV text and return only valid JSON. Never return markdown code blocks.');
-    const clean    = response.replace(/```json|```/g, '').trim();
-    const parsed   = JSON.parse(clean);
+  const response = await callClaude(
+    prompt,
+    "You are a CV parser. Extract information from the CV text and return only valid JSON. Never return markdown code blocks."
+  );
 
-    // Ensure all expected fields are present
-    return {
-      name:       parsed.name       || '',
-      email:      parsed.email      || '',
-      phone:      parsed.phone      || '',
-      summary:    parsed.summary    || '',
-      skills:     Array.isArray(parsed.skills)     ? parsed.skills     : [],
-      experience: Array.isArray(parsed.experience) ? parsed.experience : [],
-      education:  Array.isArray(parsed.education)  ? parsed.education  : [],
-      keywords:   Array.isArray(parsed.keywords)   ? parsed.keywords   : [],
-    };
-  } catch (err) {
-    console.error('CV extraction error:', err.message);
-    return {
-      name: '', email: '', phone: '', summary: '',
-      skills: [], experience: [], education: [], keywords: [],
-    };
-  }
+  console.log("Raw Claude response:");
+  console.log(response);
+
+  const clean = response.replace(/```json|```/g, "").trim();
+  const parsed = JSON.parse(clean);
+
+  console.log("Parsed AI JSON:");
+  console.log(parsed);
+
+  return {
+    name: parsed.name || "",
+    email: parsed.email || "",
+    phone: parsed.phone || "",
+    summary: parsed.summary || "",
+    skills: Array.isArray(parsed.skills) ? parsed.skills : [],
+    experience: Array.isArray(parsed.experience) ? parsed.experience : [],
+    education: Array.isArray(parsed.education) ? parsed.education : [],
+    keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
+  };
+
+} catch (err) {
+  console.error("===== AI ERROR =====");
+  console.error(err.response?.data || err.message);
+  console.error("====================");
+
+  return {
+    name: "",
+    email: "",
+    phone: "",
+    summary: "",
+    skills: [],
+    experience: [],
+    education: [],
+    keywords: [],
+  };
 }
 
+}
 // ── generateCoverLetter ───────────────────────────────────────────────────────
 async function generateCoverLetter(profile, job) {
   const skills = (() => {

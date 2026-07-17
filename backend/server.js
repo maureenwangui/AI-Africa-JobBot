@@ -127,10 +127,20 @@ if (process.env.NODE_ENV === 'production') {
 
 // ─── Connect to PostgreSQL via Prisma ────────────────────────────────────────
 const prisma = require('./confiq/prisma');
+
+console.log("DATABASE_URL loaded:", !!process.env.DATABASE_URL);
+console.log(
+  "Database host:",
+  process.env.DATABASE_URL?.match(/@([^:/]+)/)?.[1]
+);
+
 prisma.$connect()
   .then(() => console.log('✅ Connected to PostgreSQL via Prisma'))
-  .catch(err => console.error('❌ Database connection failed:', err.message));
-
+  .catch(err => {
+    console.error("Full Prisma error:");
+    console.error(err);
+  });
+  
 app.listen(PORT, () => {
   console.log(`🚀 Africa JobBot API running on port ${PORT}`);
 });
