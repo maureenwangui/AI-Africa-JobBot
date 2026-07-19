@@ -633,7 +633,15 @@ module.exports = {
 
   extractLanguages,
 
-  calculateProfileScore
+  calculateProfileScore,
+
+  calculateExperienceYears,
+
+  generateSummary,
+  detectPreferredRole,
+  calculateATSScore,
+  findMissingSections,
+  getResumeRating
 
 };
 
