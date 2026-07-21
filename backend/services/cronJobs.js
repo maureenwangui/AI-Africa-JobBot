@@ -13,12 +13,31 @@ const aiService              = require('./aiService');
 const emailService           = require('./emailService');
 const notificationService    = require('./notificationService');
 const matchingService        = require('./matchingService');
+const { collectJobs }        = require("./jobCollector");
 
 // ── Job Matching Cron — every 6 hours ─────────────────────────────────────────
+// ── Job Matching Cron — every 6 hours ─────────────────────────────────────────
 cron.schedule('0 */6 * * *', async () => {
+
   console.log('⏰ Running job matching cron...');
+
+  // First collect new jobs
   try {
+
+    console.log("🌍 Collecting latest jobs...");
+
+    const imported = await collectJobs();
+
+    console.log(`✅ Imported ${imported} new jobs.`);
+
+  } catch (err) {
+
+    console.error("❌ Job collection failed:", err.message);
+
+  }
+
     // Fixed: subscriptionStatus camelCase, FREE uppercase enum
+  try {
     const users = await prisma.user.findMany({
       where: {
         NOT: { subscriptionStatus: 'CANCELLED' },
@@ -173,3 +192,13 @@ cron.schedule('0 5 * * *', async () => {
 });
 
 console.log('⏰ Cron jobs started: job matching (every 6h) + daily summaries (8am EAT)');
+
+(async () => {
+  try {
+    console.log("🚀 Running initial job collection...");
+    const imported = await collectJobs();
+    console.log(`✅ Initial import completed (${imported} jobs).`);
+  } catch (err) {
+    console.error("Initial job collection failed:", err.message);
+  }
+})();

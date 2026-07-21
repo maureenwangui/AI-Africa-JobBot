@@ -1512,4 +1512,4 @@ module.exports = {
   // Low-level helpers (exported for testing / reuse)
   isSectionHeader,
   isValidCv,
-};
+}; 

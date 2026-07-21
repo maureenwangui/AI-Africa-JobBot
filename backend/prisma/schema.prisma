@@ -70,6 +70,7 @@ model Profile {
   profileScore       Int      @default(0)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+  country            String?
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("profiles")
@@ -200,6 +201,7 @@ model Job {
   postedAt            DateTime            @default(now())
   createdAt           DateTime            @default(now())
   updatedAt           DateTime            @updatedAt
+  region              String?
   applications        Application[]
   coverLetters        CoverLetter[]
   jobMatches          JobMatch[]

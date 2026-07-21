@@ -8,6 +8,9 @@ const { auth }   = require('../middleware/auth');
 const aiService  = require('../services/aiService');
 const cvParser = require('../services/cvParser');
 const router = express.Router();
+const { extractCountry } = require("../services/jobCollector/countryExtractor");
+const { generateRecommendations } = require("../services/recommendationService");
+
 
 // ── Multer + storage ───────────────────────────────────────────────
 const uploadDir = path.join(__dirname, "../uploads");
@@ -88,6 +91,7 @@ router.get('/', auth, async (req, res) => {
     res.json({
       id:                 profile.id,
       user_id:            profile.userId,
+      country:            profile.country,
       cv_filename:        latestResume?.originalName   || null,
       cv_url:             latestResume?.fileUrl         || null,
       skills:             parseField(profile.skills),
@@ -116,10 +120,19 @@ router.get('/', auth, async (req, res) => {
 router.put('/', auth, async (req, res) => {
   try {
     const {
-      skills, experience, education, keywords,
-      preferred_roles, preferred_location,
-      remote_preference, summary, headline,
-      linkedin, github, portfolio,
+      skills,
+      experience,
+      education,
+      keywords,
+      preferred_roles,
+      preferred_location,
+      remote_preference,
+      summary,
+      headline,
+      linkedin,
+      github,
+      portfolio,
+      country,
     } = req.body;
 
     // Profile has no dedicated `keywords` column — merge any submitted
@@ -131,6 +144,7 @@ router.put('/', auth, async (req, res) => {
     })();
 
     const data = {
+      country:            country ?? undefined,
       skills:             mergedSkills,
       experience:         experience      ? JSON.stringify(experience)      : undefined,
       education:          education       ? JSON.stringify(education)       : undefined,
@@ -244,7 +258,11 @@ if (extractedText && extractedText.trim().length > 50) {
     console.log("Skills to save:", extracted.skills);
     console.log("Experience to save:", extracted.experience);
     console.log("Education to save:", extracted.education);
-
+    
+    const country = extractCountry({
+      location: extracted.summary,
+      description: extractedText,
+   });
     // ── Save to database ──────────────────────────────────────────────────────
     // Profile has no dedicated `keywords` column — merge extracted keywords
     // into `skills` (deduplicated) so nothing extracted by the AI is lost.
@@ -260,9 +278,11 @@ if (extractedText && extractedText.trim().length > 50) {
           experience: JSON.stringify(extracted.experience || []),
           education:  JSON.stringify(extracted.education  || []),
           summary:    extracted.summary || '',
+          country:    country || null,
         },
         create: {
           userId:     String(req.user.id),
+          country:    country || null,
           skills:     mergedSkills,
           experience: JSON.stringify(extracted.experience || []),
           education:  JSON.stringify(extracted.education  || []),
@@ -282,12 +302,15 @@ if (extractedText && extractedText.trim().length > 50) {
         },
       }),
     ]);
-
+       
+       // Automatically generate recommendations
+        await generateRecommendations(req.user.id);
     res.json({
       message:   'CV uploaded and parsed successfully',
       filename:  originalName,
       file_url:  fileUrl,
       extracted: {
+        country:    country || null,
         skills:     extracted.skills     || [],
         experience: extracted.experience || [],
         education:  extracted.education  || [],
