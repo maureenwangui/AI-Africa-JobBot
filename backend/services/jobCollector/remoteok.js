@@ -3,8 +3,15 @@ const prisma = require("../../confiq/prisma");
 const { classifyRegion } = require("./regionClassifier");
 const { extractCountry } = require("./countryExtractor");
 
+// RemoteOK is a global remote-jobs board. We only keep listings that are
+// plausibly open to someone applying FROM Kenya: explicitly Kenya-tagged,
+// Africa/East-Africa-wide, or open to "anywhere"/"worldwide" remote workers.
+// Anything scoped to a specific non-African country/timezone (e.g. "US only",
+// "EU only") is skipped.
+const KENYA_ELIGIBLE_REGIONS = new Set(["GLOBAL", "AFRICA", "EAST_AFRICA"]);
+
 async function collectRemoteOK() {
-  console.log("Collecting jobs from Remote OK...");
+  console.log("Collecting Kenya-eligible remote jobs from RemoteOK...");
 
   try {
     const response = await axios.get("https://remoteok.com/api", {
@@ -20,15 +27,24 @@ async function collectRemoteOK() {
     console.log(`📦 Downloaded ${jobs.length} jobs`);
 
     let imported = 0;
+    let skippedNotEligible = 0;
 
     for (const item of jobs) {
       if (!item.position || !item.company) {
         continue;
-    }
+      }
+
+      const region = classifyRegion(item);
+      const country = extractCountry(item);
+      const openToKenya = country === "KENYA" || KENYA_ELIGIBLE_REGIONS.has(region);
+
+      if (!openToKenya) {
+        skippedNotEligible++;
+        continue;
+      }
 
       console.log(`➡️ ${item.company} - ${item.position}`);
 
-      // Find or create company
       const company = await prisma.company.upsert({
         where: {
           name: item.company,
@@ -39,7 +55,6 @@ async function collectRemoteOK() {
         },
       });
 
-      // Skip duplicates
       const exists = await prisma.job.findFirst({
         where: {
           title: item.position,
@@ -50,11 +65,8 @@ async function collectRemoteOK() {
       if (exists) {
         console.log(`⏭ Already exists: ${item.position}`);
         continue;
-     }
-      
-      const region = classifyRegion(item);
-      const country = extractCountry(item);
-      
+      }
+
       await prisma.job.create({
         data: {
           companyId: company.id,
@@ -62,7 +74,7 @@ async function collectRemoteOK() {
           description: item.description || "",
           location: item.location || "Remote",
 
-          country,
+          country: country === "KENYA" ? "KENYA" : null,
           region,
 
           remoteType: "REMOTE",
@@ -71,17 +83,17 @@ async function collectRemoteOK() {
           applyUrl: item.url || "",
           status: "ACTIVE",
         },
-     });
+      });
 
       imported++;
     }
 
-    console.log(`Imported ${imported} jobs.`);
+    console.log(`Imported ${imported} jobs (skipped ${skippedNotEligible} not open to Kenya).`);
 
     return imported;
   } catch (err) {
     console.error("❌ RemoteOK Import Error");
-    console.error(err);
+    console.error(err.message);
     return 0;
   }
 }
