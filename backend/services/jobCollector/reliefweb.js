@@ -4,7 +4,7 @@
 const axios = require("axios");
 const prisma = require("../../confiq/prisma");
 
-const RELIEFWEB_API = "https://api.reliefweb.int/v1/jobs";
+const RELIEFWEB_API = "https://api.reliefweb.int/v2/jobs";
 
 async function collectReliefWeb() {
   console.log("Collecting Kenya jobs from ReliefWeb...");
