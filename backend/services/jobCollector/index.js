@@ -1,75 +1,39 @@
-const collectRemoteOK = require("./remoteok");
+const collectReliefWeb    = require("./reliefweb");
+const collectAdzuna       = require("./adzuna");
+const collectRemoteOK     = require("./remoteok");     // filtered to Kenya-eligible remote roles
+const collectBrightMonday = require("./brightmonday"); // HTML scrape
+const collectFuzu         = require("./fuzu");         // HTML scrape
 
-// Future collectors
-// const collectRemotive = require("./remotive");
-// const collectJobicy = require("./jobicy");
-// const collectBrightMonday = require("./brightmonday");
-// const collectLinkedIn = require("./linkedin");
+async function runCollector(name, fn) {
+    try {
+        const count = await fn();
+        console.log(`✅ ${name}: ${count} jobs imported`);
+        return count;
+    } catch (err) {
+        console.error(`${name} collector failed:`, err.message);
+        return 0;
+    }
+}
 
 async function collectJobs() {
 
     console.log("====================================");
-    console.log("Starting Africa Job Collection");
+    console.log("Starting Kenya Job Collection");
     console.log("====================================");
 
     let totalImported = 0;
 
-    try {
-        const remoteImported = await collectRemoteOK();
+    totalImported += await runCollector("ReliefWeb",     collectReliefWeb);
+    totalImported += await runCollector("Adzuna",        collectAdzuna);
+    totalImported += await runCollector("RemoteOK",      collectRemoteOK);
+    totalImported += await runCollector("BrighterMonday", collectBrightMonday);
+    totalImported += await runCollector("Fuzu",          collectFuzu);
 
-        console.log(`✅ RemoteOK: ${remoteImported} jobs imported`);
-
-        totalImported += remoteImported;
-
-    } catch (err) {
-
-        console.error("RemoteOK collector failed:", err.message);
-
-    }
-
-    /*
-    try {
-
-        const remotiveImported = await collectRemotive();
-
-        console.log(`✅ Remotive: ${remotiveImported} jobs imported`);
-
-        totalImported += remotiveImported;
-
-    } catch (err) {
-
-        console.error("Remotive collector failed:", err.message);
-
-    }
-
-    try {
-
-        const jobicyImported = await collectJobicy();
-
-        console.log(`✅ Jobicy: ${jobicyImported} jobs imported`);
-
-        totalImported += jobicyImported;
-
-    } catch (err) {
-
-        console.error("Jobicy collector failed:", err.message);
-
-    }
-
-    try {
-
-        const brightMondayImported = await collectBrightMonday();
-
-        console.log(`✅ BrightMonday: ${brightMondayImported} jobs imported`);
-
-        totalImported += brightMondayImported;
-
-    } catch (err) {
-
-        console.error("BrightMonday collector failed:", err.message);
-
-    }
-    */
+    // Work254 — could not confirm this domain/site actually exists during
+    // research (no working URL found). Add it here once you confirm the
+    // real URL — happy to build its collector once we have that.
+    // const collectWork254 = require("./work254");
+    // totalImported += await runCollector("Work254", collectWork254);
 
     console.log("====================================");
     console.log(`Total Imported: ${totalImported} jobs`);
