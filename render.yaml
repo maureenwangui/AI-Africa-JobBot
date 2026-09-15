@@ -33,8 +33,6 @@ services:
         sync: false
       - key: AT_USERNAME
         value: sandbox
-      - key: FRONTEND_URL
-        sync: false
       - key: DB_PATH
         value: ./db/jobbot.sqlite
       - key: FRONTEND_URL
@@ -53,3 +51,8 @@ services:
         sync: false
       - key: MPESA_ENV
         value: sandbox
+      - key: ADZUNA_APP_ID
+        sync: false
+      - key: ADZUNA_APP_KEY
+        sync: false
+      
